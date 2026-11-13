@@ -1,4 +1,5 @@
 import Dexie, { type Table } from 'dexie';
+import type { HouseSnapshot } from './blizzard';
 import type { Character, ExportPayload, Snapshot, VendorPrice } from './types';
 
 class FlipDB extends Dexie {
@@ -91,6 +92,22 @@ export async function importPayload(p: ExportPayload): Promise<ImportResult> {
       bankAge: p.bank ? now - p.bank.t : undefined,
     };
   });
+}
+
+/** Saves a scan fetched from Blizzard's API. Returns false if that exact snapshot is already stored. */
+export async function saveApiSnapshot(snap: HouseSnapshot): Promise<boolean> {
+  const dupe = await db.snapshots.where('takenAt').equals(snap.takenAt).filter((s) => s.source === 'api').first();
+  if (dupe) return false;
+  await db.snapshots.add({
+    takenAt: snap.takenAt,
+    importedAt: Math.floor(Date.now() / 1000),
+    charKey: 'Blizzard API',
+    realm: snap.rulesetName ? `${snap.houseName} (${snap.rulesetName})` : snap.houseName,
+    source: 'api',
+    auctions: snap.itemAuctions + snap.commodityAuctions,
+    rows: snap.rows,
+  });
+  return true;
 }
 
 /** Latest scans first, without the (large) row data. */

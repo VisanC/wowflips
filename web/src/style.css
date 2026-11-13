@@ -119,3 +119,5 @@ table.compact th { cursor: default; }
   .status { margin-left: 0; }
   .matches { columns: 1; }
 }
+
+.small-btn { padding: 0.2rem 0.55rem; font-size: 0.85rem; }

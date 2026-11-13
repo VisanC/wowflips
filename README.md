@@ -40,7 +40,7 @@ cd web
 npm install
 npm run data      # download game data into public/data (needs internet)
 npm run dev       # http://localhost:5173
-npm test          # unit tests (engine, decoder)
+npm test          # unit tests (engine, decoder, Blizzard client)
 ```
 
 To test the addon's export outside the game (needs Lua 5.1):
@@ -58,9 +58,15 @@ The addon was tested against a mocked WoW API, not the real Forever client. If s
 - **Bank:** after opening the bank, `/flip status` should show "bank: 0 min ago".
 - **Export window:** the string is roughly 100–300 KB, so Ctrl+A / Ctrl+C can take a second.
 
-## Blizzard API (optional)
+## Blizzard API (optional): prices without logging in
 
-Settings has a probe that checks whether Blizzard's Game Data API publishes Forever's auction house. Create a client at [develop.battle.net](https://develop.battle.net/access/clients); the ID and secret are stored only in your browser. If a Forever namespace answers, an hourly GitHub Action could fetch prices while you're offline (not built yet).
+WoW Forever's auction houses are in Blizzard's Game Data API under the undocumented namespace `dynamic-forever-{region}`. Forever has rulesets instead of realms, so the paths are `/data/wow/ruleset/{id}/auctions/` (house list, trailing slash required), `/data/wow/ruleset/{id}/auctions/{houseId}` (items) and `.../{houseId}/commodities` (ore, bars, herbs).
+
+1. Create a client at [develop.battle.net](https://develop.battle.net/access/clients). The ID and secret are stored only in your browser.
+2. In **Settings**, enter them, click **Connect**, pick a house and click **Download and check this house**. Every ruleset lists the same 15 houses, so the app compares the house's prices with your last in-game scan to confirm which one is yours.
+3. Click **Use this house**. After that, **Fetch prices from Blizzard** (Import page) or **↻ Fetch AH** (top bar) saves a new scan whenever Blizzard has published newer data (about hourly).
+
+Bags, bank and professions still come from the in-game export.
 
 ## Layout
 
@@ -69,6 +75,7 @@ addon/FlipExport/    the WoW addon (Core.lua is pure and testable; FlipExport.lu
 addon/tests/run.lua  runs the addon with a mocked WoW API
 web/scripts/         wago.tools download + transform into public/data/*.json
 web/src/engine.ts    cost engine: cheapest of AH / vendor / crafting, recursively
+web/src/blizzard.ts  Forever auction-house client (dynamic-forever namespace, rulesets)
 web/src/views/       Crafts, Inventory, Changes, Items, Import, Settings
 .github/workflows/   build + deploy to GitHub Pages
 ```

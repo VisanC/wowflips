@@ -1,6 +1,7 @@
 import './style.css';
 import { loadGameData, type GameData } from './gamedata';
-import { loadSettings, loadState, saveSettings, type AppState } from './state';
+import { fetchConfiguredHouse } from './blizzardSync';
+import { blizzardReady, loadSettings, loadState, saveSettings, type AppState } from './state';
 import { ago, h, notice } from './ui';
 import { renderChanges } from './views/changes';
 import { renderCrafts } from './views/crafts';
@@ -34,8 +35,29 @@ async function refresh() {
   await render();
 }
 
+let headerMsg = '';
+
+function fetchButton(): HTMLElement | null {
+  if (!blizzardReady(settings)) return null;
+  const btn = h('button', { class: 'small-btn', title: `Fetch the latest prices for ${settings.blizzHouseLabel ?? 'your auction house'} from Blizzard` }, '↻ Fetch AH');
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    btn.textContent = 'Fetching…';
+    try {
+      const { added, snap } = await fetchConfiguredHouse(settings);
+      headerMsg = added ? `new scan: ${snap.rows.length.toLocaleString()} items` : 'no newer data yet';
+    } catch (e) {
+      headerMsg = (e as Error).message;
+    }
+    await refresh();
+  });
+  return btn;
+}
+
 function header(): HTMLElement {
   const current = route();
+  const msg = headerMsg;
+  headerMsg = '';
   const charSelect =
     state.chars.length > 1
       ? h(
@@ -57,7 +79,16 @@ function header(): HTMLElement {
     {},
     h('a', { class: 'brand', href: '#/crafts' }, 'Forever Flips'),
     h('nav', {}, ROUTES.map(([k, label]) => h('a', { href: `#/${k}`, class: k === current ? 'active' : '' }, label))),
-    h('div', { class: 'status' }, charSelect, state.latest ? h('span', { class: 'muted' }, ` · AH scan ${ago(state.latest.takenAt)}`) : h('span', { class: 'muted' }, ' · no AH scan yet')),
+    h(
+      'div',
+      { class: 'status' },
+      charSelect,
+      state.latest
+        ? h('span', { class: 'muted' }, ` · AH ${state.latest.source === 'api' ? 'from Blizzard' : 'scan'} ${ago(state.latest.takenAt)}`)
+        : h('span', { class: 'muted' }, ' · no AH scan yet'),
+      fetchButton(),
+      msg ? h('span', { class: 'muted small' }, msg) : null,
+    ),
   );
 }
 

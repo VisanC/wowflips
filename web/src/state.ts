@@ -12,6 +12,9 @@ export interface Settings {
   blizzRegion: string;
   blizzId: string;
   blizzSecret: string;
+  blizzRuleset?: number;
+  blizzHouse?: number;
+  blizzHouseLabel?: string;
 }
 
 const SETTINGS_KEY = 'forever-flips:settings';
@@ -53,6 +56,10 @@ export async function loadState(data: GameData, settings: Settings): Promise<App
     vendor: vendorPrices(data, VENDOR_REAGENTS, learned),
   };
   return { data, settings, chars, char, latest, previous, market };
+}
+
+export function blizzardReady(s: Settings): boolean {
+  return !!(s.blizzId && s.blizzSecret && s.blizzRuleset && s.blizzHouse);
 }
 
 export function knownSpells(char?: Character): Set<number> {

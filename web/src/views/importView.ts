@@ -1,6 +1,7 @@
+import { fetchConfiguredHouse } from '../blizzardSync';
 import { decodeExport } from '../decode';
 import { db, importPayload, listSnapshots } from '../db';
-import type { AppState } from '../state';
+import { blizzardReady, type AppState } from '../state';
 import { ago, h, notice, when } from '../ui';
 
 // Survives the re-render that follows an import.
@@ -41,6 +42,30 @@ export async function renderImport(state: AppState, refresh: () => Promise<void>
     }
   });
 
+  const blizzStatus = h('div');
+  const fetchBtn = h('button', { class: 'primary' }, 'Fetch prices from Blizzard');
+  fetchBtn.addEventListener('click', async () => {
+    fetchBtn.disabled = true;
+    try {
+      const { added, snap } = await fetchConfiguredHouse(state.settings, (m) => blizzStatus.replaceChildren(notice('info', m)));
+      lastResult = notice(
+        'ok',
+        h('strong', {}, `${snap.houseName}: `),
+        added
+          ? `saved a scan from ${ago(snap.takenAt)} with ${snap.rows.length.toLocaleString()} items (${(snap.itemAuctions + snap.commodityAuctions).toLocaleString()} auctions).`
+          : `Blizzard has not published newer data yet (latest is from ${ago(snap.takenAt)}, already saved). It updates about once an hour.`,
+      );
+      await refresh();
+    } catch (e) {
+      blizzStatus.replaceChildren(notice('error', (e as Error).message));
+      fetchBtn.disabled = false;
+    }
+  });
+  const blizzard = blizzardReady(state.settings)
+    ? h('div', { class: 'card' }, h('strong', {}, 'Blizzard API'), ` — ${state.settings.blizzHouseLabel ?? ''}`, h('div', { class: 'row' }, fetchBtn), blizzStatus,
+        h('p', { class: 'muted small' }, 'Prices only: bags, bank and professions still come from the in-game export below.'))
+    : h('p', { class: 'muted small' }, 'Tip: connect the Blizzard API in Settings to fetch AH prices without logging in.');
+
   const snaps = await listSnapshots();
   const history = snaps.length
     ? h(
@@ -57,7 +82,7 @@ export async function renderImport(state: AppState, refresh: () => Promise<void>
               h('td', {}, when(s.takenAt), h('span', { class: 'muted' }, ` (${ago(s.takenAt)})`)),
               h('td', { class: 'num' }, s.items.toLocaleString()),
               h('td', { class: 'num' }, s.auctions.toLocaleString()),
-              h('td', {}, s.charKey),
+              h('td', {}, s.source === 'api' ? `Blizzard API — ${s.realm}` : s.charKey),
               h(
                 'td',
                 {},
@@ -79,7 +104,10 @@ export async function renderImport(state: AppState, refresh: () => Promise<void>
   return h(
     'div',
     {},
-    h('h1', {}, 'Import from the game'),
+    h('h1', {}, 'Import'),
+    status,
+    blizzard,
+    h('h2', {}, 'From the game'),
     h(
       'ol',
       { class: 'steps' },
@@ -90,7 +118,6 @@ export async function renderImport(state: AppState, refresh: () => Promise<void>
     ),
     box,
     h('div', { class: 'row' }, button),
-    status,
     h('h2', {}, 'Imported scans'),
     state.latest ? null : notice('info', 'Each import with a new AH scan is kept, so price history builds up over time.'),
     history,
