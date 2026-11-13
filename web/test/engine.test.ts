@@ -239,3 +239,20 @@ describe('ties', () => {
     expect(new Engine(data, market, { ...opts([10097]), strategy: 'best' }).unitCost(3860).kind).toBe('ah');
   });
 });
+
+describe('AH price from the cheapest few', () => {
+  it('averages the cheapest units, so one bait listing cannot set the price', async () => {
+    const { ahPrice, ahMap } = await import('../src/engine');
+    // one at 1s, then 10g: the cheapest 3 cost (1s + 10g + 10g) / 3
+    expect(ahPrice(100, [[100, 1], [100000, 5]], 3)).toBe(Math.round((100 + 200000) / 3));
+    // 200 listed at the lowest price: that is the price
+    expect(ahPrice(500, [[500, 200], [900, 1]], 3)).toBe(500);
+    // fewer units known than asked for: average what is known
+    expect(ahPrice(100, [[100, 1], [300, 1]], 5)).toBe(200);
+    // lowest listing only, or nothing known past the minimum
+    expect(ahPrice(100, [[100, 1], [300, 9]], 1)).toBe(100);
+    expect(ahPrice(100, [], 3)).toBe(100);
+    const m = ahMap([[7, 100, 6, [[100, 1], [100000, 5]]]], 3);
+    expect(m.get(7)).toMatchObject({ min: 100, qty: 6, price: 66700 });
+  });
+});

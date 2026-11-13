@@ -104,7 +104,7 @@ export class Engine {
   marketSource(item: number): Source {
     let best: Source = NONE;
     const ah = this.market.ah.get(item);
-    if (ah && ah.min > 0) best = { kind: 'ah', unit: ah.min };
+    if (ah && ah.price > 0) best = { kind: 'ah', unit: ah.price };
     const vendor = this.market.vendor.get(item);
     if (vendor !== undefined && vendor < best.unit) best = { kind: 'vendor', unit: vendor };
     return best;
@@ -180,7 +180,7 @@ export class Engine {
     const ah = this.market.ah.get(r.out);
     const item = this.data.items.get(r.out);
     const vendorUnit = item?.sell ?? 0;
-    const ahNet = ah ? ah.min * (1 - this.opts.cut) : 0;
+    const ahNet = ah ? ah.price * (1 - this.opts.cut) : 0;
     const channel: 'ah' | 'vendor' = ahNet >= vendorUnit && ah ? 'ah' : 'vendor';
     const revenue = Math.max(ahNet, vendorUnit) * r.qty;
     const profit = revenue - cost;
@@ -193,7 +193,7 @@ export class Engine {
       cost,
       parts,
       complete,
-      ahUnit: ah?.min,
+      ahUnit: ah?.price,
       ahQty: ah?.qty ?? 0,
       vendorUnit,
       revenue,
@@ -216,8 +216,31 @@ export function vendorPrices(data: GameData, curated: number[], learned: { item:
   return map;
 }
 
-export function ahMap(rows: [number, number, number, [number, number][]][]): Map<number, AhRow> {
-  return new Map(rows.map(([id, min, qty, levels]) => [id, { min, qty, levels }]));
+/**
+ * Average unit price of the cheapest `depth` units on sale, from the known price levels: one
+ * listing far below the rest can't set the price, while 200 listed at the lowest price still do.
+ */
+export function ahPrice(min: number, levels: [number, number][], depth: number): number {
+  if (depth <= 1 || !levels.length) return min;
+  let units = 0;
+  let total = 0;
+  for (const [price, qty] of levels) {
+    const take = Math.min(qty, depth - units);
+    if (take <= 0) continue;
+    total += take * price;
+    units += take;
+    if (units >= depth) break;
+  }
+  return units ? Math.round(total / units) : min;
+}
+
+export function ahRow(min: number, qty: number, levels: [number, number][], depth = 1): AhRow {
+  return { min, qty, levels, price: ahPrice(min, levels, depth) };
+}
+
+/** Scan rows to AH prices. `depth`: how many of the cheapest units the price averages (1 = lowest listing). */
+export function ahMap(rows: [number, number, number, [number, number][]][], depth = 1): Map<number, AhRow> {
+  return new Map(rows.map(([id, min, qty, levels]) => [id, ahRow(min, qty, levels, depth)]));
 }
 
 /** Price/quantity changes between two scans: buyouts and crashes. */
@@ -239,7 +262,7 @@ export function compareScans(before: Map<number, AhRow>, after: Map<number, AhRo
       if (b.qty >= 5) gone.push(item);
       continue;
     }
-    const change = { item, before: b, after: a, priceRatio: a.min / b.min, qtyRatio: a.qty / b.qty };
+    const change = { item, before: b, after: a, priceRatio: a.price / b.price, qtyRatio: a.qty / b.qty };
     if (change.qtyRatio <= 0.5 && change.priceRatio >= 1.1) boughtOut.push(change);
     else if (change.priceRatio <= 0.7) crashed.push(change);
   }

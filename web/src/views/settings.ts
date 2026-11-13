@@ -176,6 +176,22 @@ export async function renderSettings(state: AppState, refresh: () => Promise<voi
           onchange: (e: Event) => { settings.cut = Number((e.target as HTMLInputElement).value) / 100; save(); },
         }),
       ),
+      h(
+        'label',
+        { class: 'field', title: 'One listing far below the rest (bait, a misclick) can make an item look cheaper than you can really buy it for, or worth less than it sells for' },
+        'AH price ',
+        h(
+          'select',
+          { onchange: async (e: Event) => { settings.priceDepth = Number((e.target as HTMLSelectElement).value); save(); await refresh(); } },
+          ...[
+            [1, 'Lowest listing'],
+            [3, 'Average of the cheapest 3 on sale'],
+            [5, 'Average of the cheapest 5 on sale'],
+            [10, 'Average of the cheapest 10 on sale'],
+          ].map(([v, label]) => h('option', { value: String(v), selected: settings.priceDepth === v }, String(label))),
+        ),
+      ),
+      h('p', { class: 'muted small' }, 'Counted per item, cheapest first: if 200 are listed at the lowest price, that is the price. Deals still show each cheap listing as it is.'),
 
       blizzardSection(state, refresh),
 

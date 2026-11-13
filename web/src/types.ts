@@ -156,7 +156,9 @@ export interface VendorPrice {
 }
 
 export interface AhRow {
-  min: number;
+  min: number; // lowest unit price listed
   qty: number;
-  levels: [number, number][];
+  levels: [number, number][]; // cheapest price levels [unit price, quantity]
+  /** What one costs to buy or sells for: the average of the cheapest few on sale (Settings), so one bait listing can't set it. */
+  price: number;
 }

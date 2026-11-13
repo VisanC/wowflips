@@ -25,7 +25,7 @@ export function learnCost(data: GameData, market: Market, r: Recipe): LearnCost 
   if (isTrainerRecipe(data, r)) opts.push({ how: 'trainer', cost: r.trainerCost, guess: !r.rm && !r.trainerSeen });
   if (r.rm?.vendorCost !== undefined) opts.push({ how: 'vendor', cost: r.rm.vendorCost });
   const item = recipeItemFor(data, r);
-  const ah = item ? market.ah.get(item)?.min : undefined;
+  const ah = item ? market.ah.get(item)?.price : undefined;
   if (item && ah !== undefined) opts.push({ how: 'ah', cost: ah, item });
   const trainer = opts.find((o) => o.how === 'trainer');
   if (trainer && trainer.cost === undefined) return trainer;

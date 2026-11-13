@@ -70,12 +70,12 @@ export function renderChanges(state: AppState): HTMLElement {
   if (!latest || !previous) {
     return h('div', {}, head, notice('info', 'You need at least two imported AH scans. Scan again later (Blizzard allows one full scan per 15 minutes) and import it.'), fastestSellers(state));
   }
-  const { boughtOut, crashed, gone } = compareScans(ahMap(previous.rows), ahMap(latest.rows));
+  const { boughtOut, crashed, gone } = compareScans(ahMap(previous.rows, state.settings.priceDepth), ahMap(latest.rows, state.settings.priceDepth));
 
   const cols = [
     { label: 'Item', value: (c: Change) => data.items.get(c.item)?.name ?? '', render: (c: Change) => itemLink(c.item, data.items.get(c.item)?.name, data.items.get(c.item)?.quality) },
-    { label: 'Before', numeric: true, value: (c: Change) => c.before.min, render: (c: Change) => [money(c.before.min), h('span', { class: 'muted' }, ` × ${c.before.qty}`)] },
-    { label: 'Now', numeric: true, value: (c: Change) => c.after.min, render: (c: Change) => [money(c.after.min), h('span', { class: 'muted' }, ` × ${c.after.qty}`)] },
+    { label: 'Before', numeric: true, value: (c: Change) => c.before.price, render: (c: Change) => [money(c.before.price), h('span', { class: 'muted' }, ` × ${c.before.qty}`)] },
+    { label: 'Now', numeric: true, value: (c: Change) => c.after.price, render: (c: Change) => [money(c.after.price), h('span', { class: 'muted' }, ` × ${c.after.qty}`)] },
     { label: 'Price', numeric: true, value: (c: Change) => c.priceRatio, render: (c: Change) => `${c.priceRatio >= 1 ? '+' : ''}${pct(c.priceRatio - 1)}` },
     { label: 'Listed', numeric: true, value: (c: Change) => c.qtyRatio, render: (c: Change) => `${c.qtyRatio >= 1 ? '+' : ''}${pct(c.qtyRatio - 1)}` },
   ];

@@ -44,7 +44,7 @@ async function itemDetail(state: AppState, id: number): Promise<HTMLElement> {
     h(
       'p',
       {},
-      'Lowest on AH: ', money(ah?.min), ah ? ` (${ah.qty} listed)` : '', '. Vendor pays ', money(item?.sell), '. ',
+      'Lowest on AH: ', money(ah?.min), ah ? ` (${ah.qty} listed)` : '', ah && ah.price !== ah.min ? [', price used ', money(ah.price), ` (average of the cheapest ${state.settings.priceDepth})`] : '', '. Vendor pays ', money(item?.sell), '. ',
       cost.kind === 'craft' ? ['Cheapest to make yourself: ', money(cost.unit), ` via ${cost.recipe.name}.`] : null,
       cost.kind === 'vendor' ? ['Vendors sell it for ', money(cost.unit), '.'] : null,
     ),
@@ -90,7 +90,7 @@ export function renderItems(state: AppState): HTMLElement {
             {},
             h('button', { class: 'link', onclick: async () => detail.replaceChildren(await itemDetail(state, i.id)) }, i.name),
             ' ',
-            market.ah.has(i.id) ? money(market.ah.get(i.id)!.min) : h('span', { class: 'muted' }, 'not listed'),
+            market.ah.has(i.id) ? money(market.ah.get(i.id)!.price) : h('span', { class: 'muted' }, 'not listed'),
           ),
         ),
       ),

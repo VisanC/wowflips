@@ -126,7 +126,7 @@ export function buildShoppingList(
   const stockValue = fromStock.reduce((s, x) => s + x.value, 0);
   const product = data.items.get(recipe.out);
   const ah = market.ah.get(recipe.out);
-  const unitRevenue = Math.max(ah ? ah.min * (1 - opts.cut) : 0, product?.sell ?? 0);
+  const unitRevenue = Math.max(ah ? ah.price * (1 - opts.cut) : 0, product?.sell ?? 0);
   const revenue = unitRevenue * recipe.qty * crafts;
 
   return {

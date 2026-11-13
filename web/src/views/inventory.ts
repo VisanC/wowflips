@@ -29,8 +29,8 @@ export function renderInventory(state: AppState): HTMLElement {
       bags: inv.bags.get(id) ?? 0,
       bank: inv.bank.get(id) ?? 0,
       count,
-      ahUnit: ah?.min,
-      ahValue: ah ? ah.min * (1 - settings.cut) * count : 0,
+      ahUnit: ah?.price,
+      ahValue: ah ? ah.price * (1 - settings.cut) * count : 0,
       vendorValue: (item?.sell ?? 0) * count,
       listed: ah?.qty ?? 0,
     };
