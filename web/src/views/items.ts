@@ -1,6 +1,9 @@
 import { db } from '../db';
 import { Engine } from '../engine';
 import { flowLine } from '../flowView';
+import { priceChart } from '../charts';
+import { idByName, type SalePoint } from '../ledger';
+import { priceDays } from './sales';
 import { engineOptions, type AppState } from '../state';
 import type { AhExportRow } from '../types';
 import { ago, h, itemLink, money, notice, sparkline, when } from '../ui';
@@ -27,6 +30,10 @@ async function itemDetail(state: AppState, id: number): Promise<HTMLElement> {
   });
   const ah = market.ah.get(id);
   const cost = new Engine(data, market, engineOptions(state)).unitCost(id);
+  const days = await priceDays(id);
+  const sales: SalePoint[] = (await db.mail.where('item').anyOf([id, 0]).toArray())
+    .filter((m) => m.kind === 'sold' && (m.item === id || idByName(data, m.name) === id))
+    .map((m) => ({ t: m.t, unit: m.price / Math.max(1, m.count), count: m.count }));
   const madeBy = data.recipesByOutput.get(id) ?? [];
   const usedIn = data.recipes.filter((r) => r.reagents.some(([rid]) => rid === id));
 
@@ -45,6 +52,9 @@ async function itemDetail(state: AppState, id: number): Promise<HTMLElement> {
       ? h('p', {}, 'Cheapest listings: ', ah.levels.flatMap(([p, q], i) => [i ? ', ' : '', `${q} at `, money(p)]))
       : null,
     flowLine(state, id, ah?.qty),
+    days.length || sales.length
+      ? [h('h3', {}, 'Price on your auction house'), priceChart({ days, sales, ref: cost.kind === 'craft' ? { value: cost.unit, label: 'craft cost' } : undefined })]
+      : null,
     history.length > 1 ? h('div', {}, sparkline(history.map((x) => x.min), 320, 60)) : null,
     history.length
       ? h(

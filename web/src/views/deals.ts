@@ -32,7 +32,7 @@ export function renderDeals(state: AppState): HTMLElement {
   const results = h('div');
   const opts = () => ({ maxPct: settings.dealMaxPct, minSold: settings.dealMinSold, minProfit: settings.dealMinProfit, cut: settings.cut });
   const drawMarket = () => {
-    const deals = underMarket(market, tsm, opts());
+    const deals = underMarket(market, tsm, opts()).filter((d) => !settings.dealStackOnly || (data.items.get(d.item)?.stack ?? 1) > 1);
     results.replaceChildren(
       table<MarketDeal>(
         deals,
@@ -95,6 +95,12 @@ export function renderDeals(state: AppState): HTMLElement {
         h('label', { class: 'field' }, 'At most ', num(Math.round(settings.dealMaxPct * 100), (v) => (settings.dealMaxPct = Math.min(1, Math.max(0.05, v / 100))), { min: 5, max: 100, step: 5 }), ' % of market'),
         h('label', { class: 'field' }, 'Sells at least ', num(settings.dealMinSold, (v) => (settings.dealMinSold = Math.max(0, v)), { min: 0, step: 1 }), ' a day'),
         h('label', { class: 'field' }, 'Total profit at least ', num(settings.dealMinProfit / 100, (v) => (settings.dealMinProfit = Math.max(0, v) * 100), { min: 0, step: 10 }), ' silver'),
+        h(
+          'label',
+          { title: "TSM's price for a piece of gear averages every version of it (different stats, random suffixes), so gear deals are less reliable" },
+          h('input', { type: 'checkbox', checked: settings.dealStackOnly, onchange: (e: Event) => { settings.dealStackOnly = (e.target as HTMLInputElement).checked; saveSettings(settings); drawMarket(); } }),
+          ' stackable goods only (skip gear)',
+        ),
       ),
       results,
       h(

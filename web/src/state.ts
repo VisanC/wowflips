@@ -1,4 +1,4 @@
-import { db, latestSnapshots, loadThroughput } from './db';
+import { db, latestSnapshots, loadThroughput, partialSnapshotsSince } from './db';
 import { ahMap, vendorPrices, type CraftMode, type EngineOptions, type Market } from './engine';
 import type { GameData } from './gamedata';
 import { emptyFlow, houseKey, type Flow, type Throughput } from './throughput';
@@ -23,10 +23,11 @@ export interface Settings {
   dealMinSold: number; // Deals: TSM sold per day at least
   dealMinProfit: number; // Deals: copper
   dealAlerts: boolean; // browser notification when new deals appear after an auto-fetch
+  dealStackOnly: boolean; // Deals: only stackable goods (TSM's gear prices mix every version of an item)
 }
 
 const SETTINGS_KEY = 'forever-flips:settings';
-const DEFAULTS: Settings = { cut: 0.05, craftMode: 'known', recipeScope: 'known', blizzRegion: 'eu', blizzId: '', blizzSecret: '', autoFetch: true, hideGathered: false, dealMaxPct: 0.7, dealMinSold: 1, dealMinProfit: 1000, dealAlerts: false };
+const DEFAULTS: Settings = { cut: 0.05, craftMode: 'known', recipeScope: 'known', blizzRegion: 'eu', blizzId: '', blizzSecret: '', autoFetch: true, hideGathered: false, dealMaxPct: 0.7, dealMinSold: 1, dealMinProfit: 1000, dealAlerts: false, dealStackOnly: false };
 
 export function loadSettings(): Settings {
   try {
@@ -67,9 +68,22 @@ export async function loadState(data: GameData, settings: Settings): Promise<App
     ah: latest ? ahMap(latest.rows) : new Map<number, AhRow>(),
     vendor: vendorPrices(data, VENDOR_REAGENTS, learned),
   };
+  // Newer partial prices (a few Auctionator searches) replace the full scan's price for those items.
+  for (const p of await partialSnapshotsSince(latest?.takenAt ?? 0)) {
+    for (const [id, min, qty, levels] of p.rows) {
+      const base = market.ah.get(id);
+      market.ah.set(id, { min, qty: qty || base?.qty || 0, levels: levels.length ? levels : [[min, qty || base?.qty || 0]] });
+    }
+  }
   const house = currentHouse(settings);
   const flow = house ? await loadThroughput(house) : undefined;
   const tsm = await loadTsm(settings.blizzRegion || 'eu');
+  // Items the game data lacks (some Forever items aren't in wago's tables): at least show their name.
+  if (tsm) {
+    for (const [id, name] of tsm.names) {
+      if (!data.items.has(id)) data.items.set(id, { id, name, quality: 1, sell: 0, buy: 0, vstack: 1, stack: 1, partial: true });
+    }
+  }
   return { data, settings, chars, char, latest, previous, market, flow, tsm };
 }
 

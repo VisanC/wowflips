@@ -142,5 +142,29 @@ await page.reload({ waitUntil: 'networkidle0' });
 await go('crafts');
 console.log('after reload, header:', (await text('header')).replace(/\s+/g, ' '));
 
+// Sales ledger + Auctionator data (an export from the addon test with mails, crafts and Auctionator)
+if (process.env.LEDGER_PASTE) {
+  console.log('import 3 (ledger):', await importPaste(process.env.LEDGER_PASTE));
+  await go('sales');
+  console.log('sales kpis:', await text('main .kpis'));
+  console.log('sales rows:\n  ' + (await page.$$eval('main table tbody tr', (r) => r.map((x) => x.innerText.replace(/\s+/g, ' ')))).join('\n  '));
+  await page.$$eval('main table tbody tr', (r) => r.find((x) => x.innerText.startsWith('Moonsight Rifle')).click());
+  await page.waitForSelector('tr.detail .chart svg');
+  console.log('rifle chart legend:', await text('tr.detail .chart-legend'), '| marks:', await page.$$eval('tr.detail .chart svg', (s) => [s[0].querySelectorAll('.sale').length, s[0].querySelectorAll('polyline').length]));
+  await page.$eval('tr.detail .chart', (el) => el.scrollIntoView({ block: 'center' }));
+  const box = await page.$('tr.detail .chart svg .hit');
+  const bb = await box.boundingBox();
+  await page.mouse.move(bb.x + bb.width - 5, bb.y + bb.height / 2);
+  console.log('hover tooltip:', await page.$eval('tr.detail .chart-tip', (t) => (t.hidden ? '(hidden)' : t.innerText.replace(/\s+/g, ' '))));
+  await page.screenshot({ path: `${shots}/sales.png`, fullPage: true });
+  await go('items');
+  await page.type('main input[type=search]', 'moonsight rifle');
+  await page.waitForSelector('.matches button');
+  await page.click('.matches button');
+  await page.waitForSelector('.card');
+  console.log('item card chart:', await page.$$eval('.card .chart', (c) => c.length), await text('.card h3').catch(() => 'no h3'));
+  await page.screenshot({ path: `${shots}/item-chart.png`, fullPage: true });
+}
+
 console.log(errors.length ? `ERRORS:\n${errors.join('\n')}` : 'no page errors');
 await browser.close();

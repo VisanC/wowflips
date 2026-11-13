@@ -271,6 +271,230 @@ local function showExport(text, rawSize)
 end
 
 ---------------------------------------------------------------------------
+-- Ledger: your own sales, purchases, expired and cancelled auctions (from the
+-- AH mails, read when you open the mailbox), your listings, and your crafts.
+---------------------------------------------------------------------------
+
+local LEDGER_DAYS = 60
+local getInstant = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
+
+local function ledger()
+	local c = charData()
+	c.ledger = c.ledger or {}
+	local L = c.ledger
+	L.mail = L.mail or {}
+	L.auctions = L.auctions or {}
+	L.crafts = L.crafts or {}
+	return L
+end
+
+local function idFromLink(link)
+	return type(link) == "string" and tonumber(link:match("item:(%d+)")) or 0
+end
+
+local function idFromName(name)
+	if not getInstant or not name then return 0 end
+	local ok, id = pcall(getInstant, name)
+	return ok and tonumber(id) or 0
+end
+
+-- "Auction expired: %s" -> "^Auction expired: (.+)$"
+local function subjectPattern(fmt)
+	if type(fmt) ~= "string" or fmt == "" then return nil end
+	local p = fmt:gsub("([%(%)%.%+%-%*%?%[%]%^%$])", "%%%1")
+	p = p:gsub("%%s", "(.+)")
+	return "^" .. p .. "$"
+end
+
+local mailKinds
+local function getMailKinds()
+	if not mailKinds then
+		mailKinds = {}
+		local subjects = {
+			sold = AUCTION_SOLD_MAIL_SUBJECT, won = AUCTION_WON_MAIL_SUBJECT,
+			expired = AUCTION_EXPIRED_MAIL_SUBJECT, cancelled = AUCTION_REMOVED_MAIL_SUBJECT,
+		}
+		for kind, fmt in pairs(subjects) do
+			local pat = subjectPattern(fmt)
+			if pat then mailKinds[#mailKinds + 1] = { kind, pat } end
+		end
+	end
+	return mailKinds
+end
+
+-- Reads every AH mail in the inbox. Mails stay up to 30 days, so the same mail is seen many
+-- times: each gets a key from its contents and the time it was sent (rounded to 5 minutes).
+local function scanMail()
+	if not GetInboxNumItems or not GetInboxHeaderInfo then return 0 end
+	local L = ledger()
+	local t = now()
+	local seen, added = {}, 0
+	for i = 1, GetInboxNumItems() do
+		local _, _, _, subject, _, _, daysLeft, hasItem = GetInboxHeaderInfo(i)
+		if type(subject) == "string" and daysLeft then
+			local kind, name
+			for _, kp in ipairs(getMailKinds()) do
+				local m = subject:match(kp[2])
+				if m then kind, name = kp[1], m break end
+			end
+			if kind then
+				local count = 1
+				local base, n = name:match("^(.-) %((%d+)%)$")
+				if base then name, count = base, tonumber(n) end
+				local price, cut, deposit = 0, 0, 0
+				if (kind == "sold" or kind == "won") and GetInboxInvoiceInfo then
+					local _, itemName, _, bid, buyout, dep, consignment, _, _, invCount = GetInboxInvoiceInfo(i)
+					if type(itemName) == "string" and itemName ~= "" then name = itemName end
+					price = bid or buyout or 0
+					cut = consignment or 0
+					deposit = dep or 0
+					if invCount and invCount > 0 then count = invCount end
+				end
+				local id = 0
+				if hasItem and GetInboxItemLink then id = idFromLink(GetInboxItemLink(i, 1)) end
+				if id == 0 then id = idFromName(name) end
+				local sent = t - math.floor((30 - daysLeft) * 86400 + 0.5)
+				sent = sent - sent % 300
+				local baseKey = table.concat({ kind, name, price, count, sent }, "|")
+				seen[baseKey] = (seen[baseKey] or 0) + 1
+				local key = baseKey .. "|" .. seen[baseKey]
+				if not L.mail[key] then
+					L.mail[key] = { k = kind, n = name, i = id, c = count, p = price, f = cut, d = deposit, t = sent }
+					added = added + 1
+				end
+			end
+		end
+	end
+	for key, m in pairs(L.mail) do
+		if m.t < t - LEDGER_DAYS * 86400 then L.mail[key] = nil end
+	end
+	return added
+end
+
+-- Your own listings, while the AH is open.
+local function captureOwned()
+	if not (C_AuctionHouse and C_AuctionHouse.GetNumOwnedAuctions and C_AuctionHouse.GetOwnedAuctionInfo) then return end
+	local L = ledger()
+	local t = now()
+	for i = 1, C_AuctionHouse.GetNumOwnedAuctions() do
+		local a = C_AuctionHouse.GetOwnedAuctionInfo(i)
+		if a and a.auctionID then
+			local e = L.auctions[a.auctionID]
+			if not e then
+				local id = (a.itemKey and a.itemKey.itemID) or idFromLink(a.itemLink)
+				e = { i = id, q = a.quantity or 1, b = a.buyoutAmount or 0, f = t }
+				L.auctions[a.auctionID] = e
+			end
+			e.l = t
+			e.s = a.status or 0
+		end
+	end
+	for aid, e in pairs(L.auctions) do
+		if (e.l or e.f) < t - LEDGER_DAYS * 86400 then L.auctions[aid] = nil end
+	end
+end
+
+local function queryOwned()
+	if C_AuctionHouse and C_AuctionHouse.QueryOwnedAuctions then pcall(C_AuctionHouse.QueryOwnedAuctions, {}) end
+end
+
+-- Crafts, counted per recipe and hour.
+local function isRecipe(spell)
+	for _, p in pairs(charData().profs) do
+		for _, s in ipairs(p.s or {}) do
+			if s == spell then return true end
+		end
+	end
+	return false
+end
+
+local function recordCast(unit, spellID)
+	if unit ~= "player" or type(spellID) ~= "number" or not isRecipe(spellID) then return end
+	local L = ledger()
+	local t = now()
+	local key = spellID .. "|" .. (t - t % 3600)
+	L.crafts[key] = (L.crafts[key] or 0) + 1
+end
+
+local function exportLedger()
+	local L = ledger()
+	local cutoff = now() - LEDGER_DAYS * 86400
+	local mail, auctions, crafts = {}, {}, {}
+	for key, m in pairs(L.mail) do
+		if m.t >= cutoff then mail[#mail + 1] = { key, m.k, m.n, m.i, m.c, m.p, m.f, m.d, m.t } end
+	end
+	for aid, a in pairs(L.auctions) do
+		auctions[#auctions + 1] = { aid, a.i, a.q, a.b, a.s or 0, a.f, a.l or a.f }
+	end
+	for key, n in pairs(L.crafts) do
+		local spell, hour = key:match("^(%d+)|(%d+)$")
+		if spell and tonumber(hour) >= cutoff then crafts[#crafts + 1] = { tonumber(spell), tonumber(hour), n } end
+	end
+	return { m = mail, a = auctions, c = crafts }
+end
+
+---------------------------------------------------------------------------
+-- Auctionator: its price database (filled by its summary scans and every
+-- search you make), read directly, so no scan of ours is needed. Per item:
+-- last price, quantity listed on the last day seen, and daily history.
+-- Day numbers count from 2020-01-01 like Auctionator's own.
+---------------------------------------------------------------------------
+
+local ATR_HISTORY_DAYS = 21
+
+local function auctionatorDB()
+	if type(Auctionator) ~= "table" then return nil end
+	local db = Auctionator.Database and Auctionator.Database.db
+	if type(db) ~= "table" and type(AUCTIONATOR_PRICE_DATABASE) == "table" and Auctionator.State then
+		db = AUCTIONATOR_PRICE_DATABASE[Auctionator.State.CurrentRealm]
+	end
+	return type(db) == "table" and db or nil
+end
+
+local function readAuctionator()
+	local db = auctionatorDB()
+	if not db then return nil end
+	local day0 = time({ year = 2020, month = 1, day = 1, hour = 0 })
+	local today = math.floor((time() - day0) / 86400)
+	local items = {}
+	for key, e in pairs(db) do
+		local id = type(key) == "string" and key:match("^%d+$") and tonumber(key) -- plain item keys; skip "g:…" and pets
+		if id and type(e) == "table" and type(e.m) == "number" and e.m > 0 then
+			local hist, last, lastKey = {}, -1, nil
+			for day, high in pairs(type(e.h) == "table" and e.h or {}) do
+				local d = tonumber(day)
+				if d then
+					if d > last then last, lastKey = d, day end
+					if d >= today - ATR_HISTORY_DAYS then
+						local low = type(e.l) == "table" and e.l[day] or nil
+						local avail = type(e.a) == "table" and e.a[day] or nil
+						hist[#hist + 1] = { d, high, low or 0, avail or 0 }
+					end
+				end
+			end
+			table.sort(hist, function(a, b) return a[1] < b[1] end)
+			local avail = (lastKey and type(e.a) == "table" and e.a[lastKey]) or 0
+			items[#items + 1] = { id, e.m, avail, last, hist }
+		end
+	end
+	table.sort(items, function(a, b) return a[1] < b[1] end)
+	-- What you posted with Auctionator: { itemId, unit price, quantity, time }
+	local posts = {}
+	local cutoff = now() - LEDGER_DAYS * 86400
+	if type(AUCTIONATOR_POSTING_HISTORY) == "table" then
+		for key, list in pairs(AUCTIONATOR_POSTING_HISTORY) do
+			local id = tonumber(key)
+			if id and type(list) == "table" then
+				for _, p in ipairs(list) do
+					if type(p) == "table" and (p.time or 0) >= cutoff then posts[#posts + 1] = { id, p.price or 0, p.quantity or 0, p.time or 0 } end
+				end
+			end
+		end
+	end
+	return { d0 = day0, t = today, i = items, p = posts }
+end
+
+---------------------------------------------------------------------------
 -- Skill levels (gathering professions like Fishing, Herbalism and Skinning
 -- have no recipe window, so their level is read from the skill list)
 ---------------------------------------------------------------------------
@@ -328,6 +552,8 @@ local function buildPayload()
 		profs = profs,
 		skills = readSkills(),
 		vend = vend,
+		ledger = exportLedger(),
+		atr = readAuctionator(),
 	}
 end
 
@@ -349,6 +575,19 @@ local function status()
 		say("profession %s %d/%d: %d recipes, %s", name, p.r, p.m, #p.s, age(p.t))
 	end
 	if n == 0 then say("professions: none yet, open each profession window once.") end
+	local L = ledger()
+	local mails, sold = 0, 0
+	for _, m in pairs(L.mail) do
+		mails = mails + 1
+		if m.k == "sold" then sold = sold + 1 end
+	end
+	local listings = 0
+	for _ in pairs(L.auctions) do listings = listings + 1 end
+	say("ledger: %d auction mails (%d sales), %d of your listings seen.", mails, sold, listings)
+	local adb = auctionatorDB()
+	local atrCount = 0
+	if adb then for _ in pairs(adb) do atrCount = atrCount + 1 end end
+	say("Auctionator: %s", adb and ("%d items in its price database, exported with history"):format(atrCount) or "not found")
 	local v = 0
 	for _ in pairs(DB.vendor) do v = v + 1 end
 	say("vendor prices remembered: %d items", v)
@@ -372,9 +611,32 @@ end
 
 function handlers.AUCTION_HOUSE_SHOW()
 	ahOpen = true
-	say("type |cffffff00/flip scan|r for a full AH scan.")
+	if auctionatorDB() then
+		say("Auctionator found: its prices go into |cffffff00/flip export|r, no scan needed (use its Full Scan button for fresh prices).")
+	else
+		say("type |cffffff00/flip scan|r for a full AH scan.")
+	end
+	C_Timer.After(1, queryOwned)
 end
 function handlers.AUCTION_HOUSE_CLOSED() ahOpen = false end
+function handlers.OWNED_AUCTIONS_UPDATED() captureOwned() end
+function handlers.AUCTION_HOUSE_AUCTION_CREATED() C_Timer.After(0.5, queryOwned) end
+
+local mailPending = false
+function handlers.MAIL_INBOX_UPDATE()
+	if mailPending then return end
+	mailPending = true
+	C_Timer.After(1, function()
+		mailPending = false
+		local ok, added = pcall(scanMail)
+		if ok and added and added > 0 then say("recorded %d auction mail%s (sales, purchases, expired).", added, added > 1 and "s" or "") end
+	end)
+end
+function handlers.MAIL_SHOW() handlers.MAIL_INBOX_UPDATE() end
+
+function handlers.UNIT_SPELLCAST_SUCCEEDED(unit, _, spellID)
+	pcall(recordCast, unit, spellID)
+end
 
 function handlers.REPLICATE_ITEM_LIST_UPDATE()
 	if not scanPending then return end

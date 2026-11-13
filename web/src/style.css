@@ -185,3 +185,24 @@ table.plan tfoot td { font-weight: 600; border-top: 1px solid var(--line); }
 .skill-yellow { color: #ffff00; }
 .skill-green { color: #40c040; }
 .skill-grey { color: #808080; }
+
+/* charts (validated dark categorical slots 1 and 2) */
+:root { --series-1: #3987e5; --series-2: #d95926; }
+.chart { position: relative; margin: 0.5rem 0 1rem; max-width: 780px; }
+.chart-svg { width: 100%; height: auto; display: block; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 0.4rem 1.2rem; font-size: 0.82rem; color: var(--muted); margin-bottom: 0.25rem; }
+.chart-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 0.4rem; vertical-align: -1px; }
+.chart .grid { stroke: var(--line); stroke-width: 1; }
+.chart .axis-zero { stroke: var(--muted); stroke-width: 1; }
+.chart .tick { fill: var(--muted); font-size: 11px; }
+.chart .hit { fill: transparent; }
+.chart .band { fill: var(--series-1); opacity: 0.18; }
+.chart .line { fill: none; stroke: var(--series-1); stroke-width: 2; stroke-linejoin: round; }
+.chart .sale { fill: var(--series-2); stroke: var(--bg); stroke-width: 2; }
+.chart .ref { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 4; }
+.chart .cross { stroke: var(--muted); stroke-width: 1; }
+.chart-tip { position: absolute; pointer-events: none; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 0.35rem 0.6rem; font-size: 0.82rem; z-index: 5; white-space: nowrap; }
+.kpis { display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 0.5rem 0 1rem; }
+.kpi { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 0.5rem 0.9rem; min-width: 9.5rem; }
+.kpi .v { font-size: 1.2rem; font-weight: 600; }
+.kpi .l { color: var(--muted); font-size: 0.8rem; }

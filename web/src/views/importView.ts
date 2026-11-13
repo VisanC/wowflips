@@ -32,7 +32,9 @@ export async function renderImport(state: AppState, refresh: () => Promise<void>
           `Bags: ${r.bags} item types. `,
           r.bankAge !== undefined ? `Bank: captured ${ago(Math.floor(Date.now() / 1000) - r.bankAge)}. ` : 'Bank: not captured yet (open your bank once). ',
           r.profs.length ? `Professions: ${r.profs.join(', ')}. ` : 'Professions: none yet (open each profession window once). ',
-          `Vendor prices: ${r.vendorItems}.`,
+          `Vendor prices: ${r.vendorItems}. `,
+          r.atrItems || r.atrHistory ? `Auctionator: ${r.atrItems.toLocaleString()} prices from today, ${r.atrHistory.toLocaleString()} item-days of price history. ` : '',
+          r.mails ? `Sales ledger: ${r.mails} new AH mails.` : '',
       );
       await refresh();
     } catch (e) {
@@ -82,7 +84,7 @@ export async function renderImport(state: AppState, refresh: () => Promise<void>
               h('td', {}, when(s.takenAt), h('span', { class: 'muted' }, ` (${ago(s.takenAt)})`)),
               h('td', { class: 'num' }, s.items.toLocaleString()),
               h('td', { class: 'num' }, s.auctions.toLocaleString()),
-              h('td', {}, s.source === 'api' ? `Blizzard API — ${s.realm}` : s.charKey),
+              h('td', {}, s.source === 'api' ? `Blizzard API — ${s.realm}` : s.source === 'auctionator' ? `Auctionator${s.partial ? ' (a few items)' : ''} — ${s.charKey}` : s.charKey),
               h(
                 'td',
                 {},

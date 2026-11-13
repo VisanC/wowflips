@@ -42,7 +42,8 @@ const toUnix = (v) => {
 };
 
 /**
- * TSM CSV -> { updatedAt, columns, items: [[itemId, marketValue, historical, avgSalePrice, saleRate, soldPerDay]] }
+ * TSM CSV -> { updatedAt, columns, items: [[itemId, marketValue, historical, avgSalePrice, saleRate, soldPerDay, name]] }
+ * (the name fills in items the game data from wago.tools doesn't have)
  * Columns are found by name, so a reordered file still works; unknown extra columns are ignored.
  */
 export function parseTsmCsv(text) {
@@ -52,6 +53,7 @@ export function parseTsmCsv(text) {
   const col = (name) => header.indexOf(name);
   const idx = {
     id: col('itemId'),
+    name: col('name'),
     marketValue: col('marketValue'),
     historical: col('historical'),
     avgSalePrice: col('avgSalePrice'),
@@ -75,6 +77,7 @@ export function parseTsmCsv(text) {
       num(cells, idx.avgSalePrice),
       Math.round(num(cells, idx.saleRate) * 10000) / 10000,
       Math.round(num(cells, idx.soldPerDay) * 100) / 100,
+      idx.name < 0 ? '' : (cells[idx.name] ?? '').trim(),
     ]);
   }
   items.sort((a, b) => a[0] - b[0]);

@@ -14,16 +14,19 @@ export interface TsmData {
   updatedAt: number; // unix seconds, from TSM's file
   fetchedAt: number;
   items: Map<number, TsmRow>;
+  names: Map<number, string>;
 }
 
-type RawFile = { updatedAt?: number; fetchedAt?: number; items: [number, number, number, number, number, number][] };
+type RawFile = { updatedAt?: number; fetchedAt?: number; items: [number, number, number, number, number, number, string?][] };
 
 export function parseTsmFile(region: string, raw: RawFile): TsmData {
   const items = new Map<number, TsmRow>();
-  for (const [id, marketValue, historical, avgSalePrice, saleRate, soldPerDay] of raw.items ?? []) {
+  const names = new Map<number, string>();
+  for (const [id, marketValue, historical, avgSalePrice, saleRate, soldPerDay, name] of raw.items ?? []) {
     items.set(id, { marketValue, historical, avgSalePrice, saleRate, soldPerDay });
+    if (name) names.set(id, name);
   }
-  return { region, updatedAt: raw.updatedAt ?? 0, fetchedAt: raw.fetchedAt ?? 0, items };
+  return { region, updatedAt: raw.updatedAt ?? 0, fetchedAt: raw.fetchedAt ?? 0, items, names };
 }
 
 const cache = new Map<string, Promise<TsmData | undefined>>();

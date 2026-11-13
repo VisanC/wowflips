@@ -9,6 +9,7 @@ import { renderCrafts } from './views/crafts';
 import { renderDeals } from './views/deals';
 import { renderLearn } from './views/learn';
 import { renderLeveling } from './views/leveling';
+import { renderSales } from './views/sales';
 import { underMarket, vendorFlips } from './deals';
 import { renderImport } from './views/importView';
 import { renderInventory } from './views/inventory';
@@ -20,6 +21,7 @@ const ROUTES = [
   ['deals', 'Deals'],
   ['learn', 'Learn'],
   ['leveling', 'Leveling'],
+  ['sales', 'Sales'],
   ['inventory', 'Inventory'],
   ['changes', 'Changes'],
   ['items', 'Items'],
@@ -181,6 +183,7 @@ async function render() {
     case 'deals': view = renderDeals(state); break;
     case 'learn': view = renderLearn(state); break;
     case 'leveling': view = renderLeveling(state); break;
+    case 'sales': view = await renderSales(state); break;
     case 'settings': view = await renderSettings(state, refresh); break;
     default: view = renderCrafts(state, () => void render());
   }

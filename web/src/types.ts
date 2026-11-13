@@ -9,6 +9,7 @@ export interface Item {
   buy: number; // what a vendor charges, for `vstack` units
   vstack: number;
   stack: number;
+  partial?: boolean; // known only by name (from TSM): not in the game data from wago.tools
 }
 
 export interface Recipe {
@@ -37,6 +38,69 @@ export interface ExportPayload {
   /** Every skill line: [name, rank, max]. Added in addon 0.2.0; older exports lack it. */
   skills?: [string, number, number][];
   vend: [item: number, unitCopper: number, seenAt: number][];
+  /** Your AH mails, listings and crafts (addon 0.3.0+). Lua writes an empty list as {} or []. */
+  ledger?: { m?: LedgerMailRow[]; a?: OwnAuctionRow[]; c?: CraftRow[] };
+  /** Auctionator's price database (addon 0.3.0+). Days count from d0 (unix), today = t. */
+  atr?: { d0: number; t: number; i?: AtrRow[]; p?: AtrPost[] };
+}
+
+export type MailKind = 'sold' | 'won' | 'expired' | 'cancelled';
+export type LedgerMailRow = [key: string, kind: MailKind, name: string, item: number, count: number, price: number, cut: number, deposit: number, t: number];
+export type OwnAuctionRow = [auctionId: number, item: number, qty: number, buyout: number, status: number, first: number, last: number];
+export type CraftRow = [spell: number, hour: number, count: number];
+export type AtrRow = [item: number, price: number, avail: number, lastDay: number, hist: [day: number, high: number, low: number, avail: number][]];
+export type AtrPost = [item: number, unitPrice: number, qty: number, t: number];
+
+/** One AH mail: a sale, a purchase, or an auction that expired or was cancelled. */
+export interface MailRecord {
+  id: string; // char|key, unique
+  char: string;
+  kind: MailKind;
+  name: string;
+  item: number; // 0 when the addon couldn't tell; resolved by name
+  count: number;
+  price: number; // total paid (sale or purchase)
+  cut: number; // AH cut on a sale
+  deposit: number;
+  t: number;
+}
+
+export interface ListingRecord {
+  id: string; // char|auctionId
+  char: string;
+  item: number;
+  qty: number;
+  buyout: number;
+  status: number; // 0 active, 1 sold
+  first: number;
+  last: number;
+}
+
+export interface CraftRecord {
+  id: string; // char|spell|hour
+  char: string;
+  spell: number;
+  hour: number;
+  count: number;
+}
+
+export interface PostRecord {
+  id: string;
+  char: string;
+  item: number;
+  unit: number;
+  qty: number;
+  t: number;
+}
+
+/** A day of Auctionator's price history for one item on your auction house. */
+export interface HistoryRecord {
+  id: string; // item|day
+  item: number;
+  day: number; // unix seconds at the start of the day
+  low: number;
+  high: number;
+  avail: number;
 }
 
 /** [itemId, minUnitPrice, totalQuantity, [[price, qty], ...cheapest levels]] */
@@ -49,7 +113,9 @@ export interface Snapshot {
   charKey: string;
   realm: string;
   faction?: string;
-  source: 'paste' | 'api';
+  source: 'paste' | 'api' | 'auctionator';
+  /** Covers only some items (e.g. a few Auctionator searches): laid over the last full scan. */
+  partial?: boolean;
   auctions: number;
   rows: AhExportRow[];
 }
