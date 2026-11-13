@@ -142,7 +142,6 @@ input.qty { width: 5.5rem; }
 .nomargin { margin: 0.25rem 0 0; }
 .tag.vendor { color: #9ccc65; border-color: #3e5a26; }
 
-.costcell { display: inline-flex; flex-direction: column; align-items: flex-end; line-height: 1.15; }
 .pct { font-size: 0.8rem; font-variant-numeric: tabular-nums; }
 .pct.pos { color: var(--ok); }
 .pct.neg { color: var(--bad, #e57373); }

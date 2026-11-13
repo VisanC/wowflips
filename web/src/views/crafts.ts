@@ -54,10 +54,10 @@ export function filterRecipes(state: AppState): Recipe[] {
 
 const pctTag = (e: CraftEval) => h('span', { class: `pct ${e.profit >= 0 ? 'pos' : 'neg'}` }, signedPct(e.margin));
 
-/** Cost of one method with its profit % underneath. */
+/** Cost of one method; underlined when it is the cheapest. */
 const costCell = (e: CraftEval, best?: number) =>
   e.complete
-    ? h('span', { class: 'costcell' }, h('span', { class: best !== undefined && Math.abs(e.cost - best) < 0.5 ? 'cheapest' : '' }, money(e.cost)), pctTag(e))
+    ? h('span', { class: best !== undefined && Math.abs(e.cost - best) < 0.5 ? 'cheapest' : '' }, money(e.cost))
     : h('span', { class: 'muted', title: 'Some reagent has no AH or vendor price' }, '—');
 
 function renderShoppingList(list: ShoppingList, label: string, state: AppState): HTMLElement {
