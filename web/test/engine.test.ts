@@ -256,3 +256,15 @@ describe('AH price from the cheapest few', () => {
     expect(m.get(7)).toMatchObject({ min: 100, qty: 6, price: 66700 });
   });
 });
+
+describe('sub-crafts from your professions only', () => {
+  it('uses a recipe you could learn in your profession, never one from a profession you lack', () => {
+    // bars far cheaper to smelt than to buy; Mithril Bar's only recipe is Mining
+    const market = { ah: ahMap([[3858, 100, 50, []], [3860, 5000, 50, []]]), vendor };
+    const withMining = { ...opts([], 'profession'), profSkills: new Set([186]) };
+    const engineerOnly = { ...opts([], 'profession'), profSkills: new Set([202]) };
+    expect(new Engine(data, market, withMining).unitCost(3860).kind).toBe('craft');
+    expect(new Engine(data, market, engineerOnly).unitCost(3860).kind).toBe('ah');
+    expect(new Engine(data, market, opts([], 'known')).unitCost(3860).kind).toBe('ah');
+  });
+});

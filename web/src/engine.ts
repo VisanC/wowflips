@@ -15,7 +15,7 @@
 import type { GameData } from './gamedata';
 import type { AhRow, Recipe } from './types';
 
-export type CraftMode = 'known' | 'all' | 'none';
+export type CraftMode = 'known' | 'profession' | 'all' | 'none';
 /** Costs this close (in copper) count as equal. */
 const TIE = 0.5;
 
@@ -35,6 +35,8 @@ export interface Market {
 export interface EngineOptions {
   cut: number; // AH cut, e.g. 0.05
   craftMode: CraftMode; // which recipes may be used for sub-components
+  /** Your professions' skill lines, for craftMode 'profession'. */
+  profSkills?: Set<number>;
   known: Set<number>; // spell ids you know
   strategy?: Strategy; // default 'best'
   /** Per-item choices that override the strategy (the user flipped a part to buy or craft). */
@@ -93,6 +95,7 @@ export class Engine {
   private recipeAllowed(r: Recipe): boolean {
     if (this.opts.craftMode === 'none') return false;
     if (this.opts.craftMode === 'all') return true;
+    if (this.opts.craftMode === 'profession') return this.opts.known.has(r.spell) || !!this.opts.profSkills?.has(r.skill);
     return this.opts.known.has(r.spell);
   }
 

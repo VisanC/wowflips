@@ -2,7 +2,7 @@ import { Engine, STRATEGY_LABEL, type Choice, type CraftEval, type Part, type So
 import { flowLine, rate, salesCell, soldPerDay } from '../flowView';
 import { BONUS_ITEMS, gathersFor, skillName, skillRank } from '../gather';
 import { buildShoppingList, shoppingListText, type ShoppingList } from '../shopping';
-import { engineOptions, inventory, knownSpells, saveSettings, type AppState } from '../state';
+import { engineOptions, inventory, knownSpells, saveSettings, type AppState, professionSkills } from '../state';
 import type { Recipe } from '../types';
 import { ago, h, itemLink, money, moneyText, nodes, notice, signedPct, table } from '../ui';
 
@@ -42,9 +42,7 @@ const qtyText = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2).r
 export function filterRecipes(state: AppState): Recipe[] {
   const { data, settings, char } = state;
   const known = knownSpells(char);
-  const profSkills = new Set(
-    (char?.profs ?? []).map((p) => [...data.skills.entries()].find(([, name]) => name === p.n)?.[0]).filter((x): x is number => x !== undefined),
-  );
+  const profSkills = professionSkills(data, char);
   return data.recipes.filter((r) => {
     if (settings.recipeScope === 'known') return known.has(r.spell);
     if (settings.recipeScope === 'profession') return profSkills.has(r.skill);
@@ -417,7 +415,7 @@ export function renderCrafts(state: AppState, rerender: () => void): HTMLElement
         onchange: (e: Event) => { settings.craftMode = (e.target as HTMLSelectElement).value as typeof settings.craftMode; saveSettings(settings); rerender(); },
       },
       h('option', { value: 'known', selected: settings.craftMode === 'known' }, 'Sub-crafts: only recipes I know'),
-      h('option', { value: 'all', selected: settings.craftMode === 'all' }, 'Sub-crafts: any recipe'),
+      h('option', { value: 'profession', selected: settings.craftMode === 'profession' || settings.craftMode === 'all' }, 'Sub-crafts: any recipe in my professions'),
     ),
     h('label', {}, h('input', { type: 'checkbox', onchange: (e: Event) => { filters.profitable = (e.target as HTMLInputElement).checked; draw(); } }), ' profitable only'),
     h('label', {}, h('input', { type: 'checkbox', onchange: (e: Event) => { filters.makeable = (e.target as HTMLInputElement).checked; draw(); } }), ' can make now'),

@@ -142,7 +142,7 @@ function blizzardSection(state: AppState, refresh: () => Promise<void>): HTMLEle
       'p',
       { class: 'muted small' },
       state.tsm
-        ? `TradeSkillMaster sales data (${state.tsm.region.toUpperCase()}): ${state.tsm.items.size.toLocaleString()} items, updated ${ago(state.tsm.updatedAt || state.tsm.fetchedAt)}. The site picks up a new file every 6 hours.`
+        ? `TradeSkillMaster sales data (${state.tsm.region.toUpperCase()}): ${state.tsm.items.size.toLocaleString()} items, from TSM's scan ${ago(state.tsm.updatedAt || state.tsm.fetchedAt)}. TSM publishes region data once a day; the site checks for a new file every hour.`
         : 'TradeSkillMaster sales data: not available for this region in the current site build.',
     ),
     state.flow

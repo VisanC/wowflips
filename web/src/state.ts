@@ -33,7 +33,10 @@ const DEFAULTS: Settings = { cut: 0.05, craftMode: 'known', recipeScope: 'known'
 
 export function loadSettings(): Settings {
   try {
-    return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') };
+    const s: Settings = { ...DEFAULTS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') };
+    // "any recipe" used to include other professions' recipes (transmutes for a non-alchemist)
+    if (s.craftMode === 'all') s.craftMode = 'profession';
+    return s;
   } catch {
     return { ...DEFAULTS };
   }
@@ -165,8 +168,14 @@ export function knownSpells(char?: Character): Set<number> {
   return new Set((char?.profs ?? []).flatMap((p) => p.s));
 }
 
+/** Skill lines of your professions (Engineering, Mining…). */
+export function professionSkills(data: GameData, char?: Character): Set<number> {
+  const byName = new Map([...data.skills.entries()].map(([id, name]) => [name, id]));
+  return new Set((char?.profs ?? []).map((p) => byName.get(p.n)).filter((x): x is number => x !== undefined));
+}
+
 export function engineOptions(state: AppState): EngineOptions {
-  return { cut: state.settings.cut, craftMode: state.settings.craftMode, known: knownSpells(state.char) };
+  return { cut: state.settings.cut, craftMode: state.settings.craftMode, known: knownSpells(state.char), profSkills: professionSkills(state.data, state.char) };
 }
 
 export function inventory(char?: Character): { total: Map<number, number>; bags: Map<number, number>; bank: Map<number, number> } {
