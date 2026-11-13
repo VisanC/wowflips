@@ -1,0 +1,180 @@
+// Price engine: what an item really costs you, and what a craft really earns.
+//
+// An item's cost is the cheapest of:
+//   - buying it on the AH (lowest unit price in the latest scan)
+//   - buying it from a vendor (known vendor reagents, or prices the addon saw)
+//   - crafting it, where each reagent is costed the same way (recursively)
+// Crafting is only considered through recipes allowed by the options
+// (your known recipes by default), and never loops back into itself.
+
+import type { GameData } from './gamedata';
+import type { AhRow, Recipe } from './types';
+
+export type CraftMode = 'known' | 'all' | 'none';
+
+export interface Market {
+  ah: Map<number, AhRow>;
+  vendor: Map<number, number>; // unit price in copper
+}
+
+export interface EngineOptions {
+  cut: number; // AH cut, e.g. 0.05
+  craftMode: CraftMode; // which recipes may be used for sub-components
+  known: Set<number>; // spell ids you know
+}
+
+export type Source =
+  | { kind: 'ah'; unit: number }
+  | { kind: 'vendor'; unit: number }
+  | { kind: 'craft'; unit: number; recipe: Recipe; parts: Part[] }
+  | { kind: 'none'; unit: number };
+
+export interface Part {
+  item: number;
+  count: number;
+  source: Source;
+}
+
+export interface CraftEval {
+  recipe: Recipe;
+  cost: number; // per craft
+  parts: Part[];
+  complete: boolean; // every reagent has a price
+  ahUnit?: number; // lowest AH unit price of the product
+  ahQty: number;
+  vendorUnit: number; // vendor sell price of the product
+  revenue: number; // per craft, best of AH (after cut) or vendor
+  channel: 'ah' | 'vendor';
+  profit: number; // per craft
+  margin: number; // profit / cost
+  craftableNow: number; // from your bags + bank, direct reagents only
+}
+
+const NONE: Source = { kind: 'none', unit: Infinity };
+
+export class Engine {
+  private memo = new Map<number, Source>();
+
+  constructor(
+    private data: GameData,
+    private market: Market,
+    private opts: EngineOptions,
+  ) {}
+
+  private recipeAllowed(r: Recipe): boolean {
+    if (this.opts.craftMode === 'none') return false;
+    if (this.opts.craftMode === 'all') return true;
+    return this.opts.known.has(r.spell);
+  }
+
+  /** Cheapest way to get one unit of `item`. */
+  unitCost(item: number, path: Set<number> = new Set()): Source {
+    const cached = this.memo.get(item);
+    if (cached) return cached;
+
+    let best: Source = NONE;
+    const ah = this.market.ah.get(item);
+    if (ah && ah.min > 0) best = { kind: 'ah', unit: ah.min };
+    const vendor = this.market.vendor.get(item);
+    if (vendor !== undefined && vendor < best.unit) best = { kind: 'vendor', unit: vendor };
+
+    for (const r of this.data.recipesByOutput.get(item) ?? []) {
+      if (!this.recipeAllowed(r) || path.has(r.spell)) continue;
+      const next = new Set(path).add(r.spell);
+      const { cost, parts, complete } = this.reagentCost(r, next);
+      if (!complete) continue;
+      const unit = cost / r.qty;
+      if (unit < best.unit) best = { kind: 'craft', unit, recipe: r, parts };
+    }
+
+    // Only memoize results computed outside a crafting chain; inside one,
+    // the result can depend on which recipes are excluded by `path`.
+    if (path.size === 0) this.memo.set(item, best);
+    return best;
+  }
+
+  private reagentCost(r: Recipe, path: Set<number>) {
+    let cost = 0;
+    let complete = true;
+    const parts: Part[] = [];
+    for (const [item, count] of r.reagents) {
+      const source = this.unitCost(item, path);
+      if (!Number.isFinite(source.unit)) complete = false;
+      else cost += source.unit * count;
+      parts.push({ item, count, source });
+    }
+    return { cost, parts, complete };
+  }
+
+  evaluate(r: Recipe, inventory: Map<number, number> = new Map()): CraftEval {
+    const { cost, parts, complete } = this.reagentCost(r, new Set([r.spell]));
+    const ah = this.market.ah.get(r.out);
+    const item = this.data.items.get(r.out);
+    const vendorUnit = item?.sell ?? 0;
+    const ahNet = ah ? ah.min * (1 - this.opts.cut) : 0;
+    const channel: 'ah' | 'vendor' = ahNet >= vendorUnit && ah ? 'ah' : 'vendor';
+    const revenue = Math.max(ahNet, vendorUnit) * r.qty;
+    const profit = revenue - cost;
+    let craftableNow = Infinity;
+    for (const [reagent, count] of r.reagents) {
+      craftableNow = Math.min(craftableNow, Math.floor((inventory.get(reagent) ?? 0) / count));
+    }
+    return {
+      recipe: r,
+      cost,
+      parts,
+      complete,
+      ahUnit: ah?.min,
+      ahQty: ah?.qty ?? 0,
+      vendorUnit,
+      revenue,
+      channel,
+      profit,
+      margin: cost > 0 ? profit / cost : 0,
+      craftableNow: Number.isFinite(craftableNow) ? craftableNow : 0,
+    };
+  }
+}
+
+/** Unit vendor prices: known vendor reagents from game data, overridden by prices the addon saw. */
+export function vendorPrices(data: GameData, curated: number[], learned: { item: number; unit: number }[]): Map<number, number> {
+  const map = new Map<number, number>();
+  for (const id of curated) {
+    const item = data.items.get(id);
+    if (item && item.buy > 0) map.set(id, item.buy / Math.max(1, item.vstack));
+  }
+  for (const v of learned) map.set(v.item, v.unit);
+  return map;
+}
+
+export function ahMap(rows: [number, number, number, [number, number][]][]): Map<number, AhRow> {
+  return new Map(rows.map(([id, min, qty, levels]) => [id, { min, qty, levels }]));
+}
+
+/** Price/quantity changes between two scans: buyouts and crashes. */
+export interface Change {
+  item: number;
+  before: AhRow;
+  after: AhRow;
+  priceRatio: number;
+  qtyRatio: number;
+}
+
+export function compareScans(before: Map<number, AhRow>, after: Map<number, AhRow>) {
+  const boughtOut: Change[] = [];
+  const crashed: Change[] = [];
+  const gone: number[] = [];
+  for (const [item, b] of before) {
+    const a = after.get(item);
+    if (!a) {
+      if (b.qty >= 5) gone.push(item);
+      continue;
+    }
+    const change = { item, before: b, after: a, priceRatio: a.min / b.min, qtyRatio: a.qty / b.qty };
+    if (change.qtyRatio <= 0.5 && change.priceRatio >= 1.1) boughtOut.push(change);
+    else if (change.priceRatio <= 0.7) crashed.push(change);
+  }
+  boughtOut.sort((x, y) => y.priceRatio - x.priceRatio);
+  crashed.sort((x, y) => x.priceRatio - y.priceRatio);
+  return { boughtOut, crashed, gone };
+}
