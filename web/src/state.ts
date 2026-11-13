@@ -19,10 +19,14 @@ export interface Settings {
   blizzHouseLabel?: string;
   autoFetch: boolean; // fetch Blizzard prices every hour while the page is open
   hideGathered: boolean; // Crafts: leave out gathered items (ore, herbs, fish…)
+  dealMaxPct: number; // Deals: listing at most this share of the market price
+  dealMinSold: number; // Deals: TSM sold per day at least
+  dealMinProfit: number; // Deals: copper
+  dealAlerts: boolean; // browser notification when new deals appear after an auto-fetch
 }
 
 const SETTINGS_KEY = 'forever-flips:settings';
-const DEFAULTS: Settings = { cut: 0.05, craftMode: 'known', recipeScope: 'known', blizzRegion: 'eu', blizzId: '', blizzSecret: '', autoFetch: true, hideGathered: false };
+const DEFAULTS: Settings = { cut: 0.05, craftMode: 'known', recipeScope: 'known', blizzRegion: 'eu', blizzId: '', blizzSecret: '', autoFetch: true, hideGathered: false, dealMaxPct: 0.7, dealMinSold: 1, dealMinProfit: 1000, dealAlerts: false };
 
 export function loadSettings(): Settings {
   try {

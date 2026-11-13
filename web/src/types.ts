@@ -17,6 +17,7 @@ export interface Recipe {
   skill: number;
   yellow: number; // skill where it turns yellow
   grey: number; // skill where it turns grey
+  learn?: number; // skill needed to learn it (orange from here to yellow)
   out: number; // crafted item id
   qty: number; // items per craft
   reagents: [item: number, count: number][];

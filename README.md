@@ -21,6 +21,12 @@ On **Crafts**, every recipe shows three costs, each with its profit % underneath
 
 Gathering professions (Mining, Herbalism, Skinning, Fishing) are listed too, as "gathered" rows: what one ore, herb, leather or fish sells for, how fast it sells, how many you hold, and whether processing it first (smelting, for example) pays more. Gems, stone and some herbs are marked "bonus": they only drop while gathering something else. Tick **hide gathered** to leave them out. Fishing, Herbalism and Skinning levels need addon 0.2.0 or newer (download the zip again from the Import page).
 
+### Deals, Learn and Leveling
+
+- **Deals**: *vendor flips* (listings cheaper than a vendor pays: buy and vendor them) and listings *under market price* (well below TradeSkillMaster's region price for items that sell at least N a day), with profit after the AH cut. Set your own limits; tick the box to get a browser notification when new deals turn up after an hourly fetch.
+- **Learn**: recipes you don't know yet in your professions, with profit per craft at today's prices, the skill needed, how to learn it (trainer, or the recipe item and its AH price) and how many crafts it takes to pay the recipe back. Click one for its full buy-or-craft plan.
+- **Leveling**: the cheapest way from your skill to a target. For every skill point it picks the recipe with the lowest expected cost per point (orange always gives a point; from yellow to grey the chance falls to zero), counting what the products sell back for (vendor, AH, or nothing). Shows the steps, expected crafts, cost, and the materials for the whole plan.
+
 ### Sales per day
 
 Two sources, shown side by side:

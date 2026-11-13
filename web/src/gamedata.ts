@@ -11,7 +11,7 @@ export interface GameData {
 }
 
 type RawItem = [number, string, number, number, number, number, number];
-type RawRecipe = [number, string, number, number, number, number, number, [number, number][]];
+type RawRecipe = [number, string, number, number, number, number, number, [number, number][], number?];
 
 export function buildGameData(
   meta: { build: string; generatedAt: string },
@@ -23,8 +23,8 @@ export function buildGameData(
   for (const [id, name, quality, sell, buy, vstack, stack] of rawItems) {
     items.set(id, { id, name, quality, sell, buy, vstack, stack });
   }
-  const recipes: Recipe[] = rawRecipes.map(([spell, name, skill, yellow, grey, out, qty, reagents]) => ({
-    spell, name, skill, yellow, grey, out, qty, reagents,
+  const recipes: Recipe[] = rawRecipes.map(([spell, name, skill, yellow, grey, out, qty, reagents, learn]) => ({
+    spell, name, skill, yellow, grey, out, qty, reagents, learn: learn || Math.min(yellow, grey) || 1,
   }));
   const recipesBySpell = new Map(recipes.map((r) => [r.spell, r]));
   const recipesByOutput = new Map<number, Recipe[]>();

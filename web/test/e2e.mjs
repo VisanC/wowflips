@@ -94,6 +94,28 @@ await page.waitForSelector('tr.detail .chain');
 console.log('mithril ore detail:', (await text('tr.detail')).replace(/\s+/g, ' '));
 await page.screenshot({ path: `${shots}/crafts-gather.png`, fullPage: true });
 
+// Deals, Learn and Leveling tabs
+const rowsOf = async (sel = 'main table tbody tr') => page.$$eval(sel, (r) => r.filter((x) => !x.classList.contains('detail') && !x.parentElement.closest('tr.detail')).map((x) => x.innerText.replace(/\s+/g, ' ')));
+await go('deals');
+console.log('deals headings:', await page.$$eval('main h2', (hs) => hs.map((x) => x.innerText)));
+console.log('deals tables:', JSON.stringify(await page.$$eval('main table', (ts) => ts.map((t) => [...t.querySelectorAll('tbody tr')].slice(0, 3).map((r) => r.innerText.replace(/\s+/g, ' '))))));
+await page.screenshot({ path: `${shots}/deals.png`, fullPage: true });
+
+await go('learn');
+console.log('learn rows:\n  ' + (await rowsOf()).slice(0, 6).join('\n  '));
+await page.$$eval('main table tbody tr', (r) => r[0]?.click());
+await page.waitForSelector('tr.detail table.plan');
+console.log('learn detail presets:', await text('tr.detail .presets'));
+await page.screenshot({ path: `${shots}/learn.png`, fullPage: true });
+
+await go('leveling');
+console.log('leveling profs:', await page.$$eval('main .controls select', (s) => s[0].innerText.replace(/\s+/g, ' | ')));
+console.log('leveling summary:', await text('main .plan-summary'));
+console.log('leveling steps:\n  ' + (await rowsOf('main > div > div > div > .table-wrap table tbody tr, main table tbody tr')).slice(0, 8).join('\n  '));
+await page.$$eval('main .controls select', (s) => { s[1].value = 'trainer'; s[1].dispatchEvent(new Event('change')); });
+console.log('leveling with trainer recipes:', await text('main .plan-summary'));
+await page.screenshot({ path: `${shots}/leveling.png`, fullPage: true });
+
 await go('inventory');
 console.log('inventory:', (await text('main p')).replace(/\s+/g, ' '));
 await page.screenshot({ path: `${shots}/inventory.png`, fullPage: true });

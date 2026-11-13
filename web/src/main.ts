@@ -3,9 +3,13 @@ import { loadGameData, type GameData } from './gamedata';
 import { fetchConfiguredHouse } from './blizzardSync';
 import { db } from './db';
 import { blizzardReady, loadSettings, loadState, saveSettings, type AppState } from './state';
-import { ago, h, notice } from './ui';
+import { ago, h, moneyText, notice } from './ui';
 import { renderChanges } from './views/changes';
 import { renderCrafts } from './views/crafts';
+import { renderDeals } from './views/deals';
+import { renderLearn } from './views/learn';
+import { renderLeveling } from './views/leveling';
+import { underMarket, vendorFlips } from './deals';
 import { renderImport } from './views/importView';
 import { renderInventory } from './views/inventory';
 import { renderItems } from './views/items';
@@ -13,6 +17,9 @@ import { renderSettings } from './views/settings';
 
 const ROUTES = [
   ['crafts', 'Crafts'],
+  ['deals', 'Deals'],
+  ['learn', 'Learn'],
+  ['leveling', 'Leveling'],
   ['inventory', 'Inventory'],
   ['changes', 'Changes'],
   ['items', 'Items'],
@@ -68,8 +75,43 @@ async function autoFetchTick() {
   const added = await runFetch(true);
   // Don't re-render the page under the user (open rows, filters); offer a link instead.
   state = await loadState(data, settings);
-  if (added) newDataWaiting = true;
+  if (added) {
+    newDataWaiting = true;
+    notifyDeals();
+  }
   app.querySelector('header')?.replaceWith(header());
+}
+
+const NOTIFIED_KEY = 'forever-flips:notified-deals';
+
+/** After new prices arrive: a browser notification for deals not announced before (item at that price). */
+function notifyDeals() {
+  if (!settings.dealAlerts || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  const opts = { maxPct: settings.dealMaxPct, minSold: settings.dealMinSold, minProfit: settings.dealMinProfit, cut: settings.cut };
+  const found = [
+    ...vendorFlips(data, state.market).filter((f) => f.profit >= settings.dealMinProfit).map((f) => ({ item: f.item, price: f.price, profit: f.profit, why: 'below vendor price' })),
+    ...underMarket(state.market, state.tsm, opts).map((d) => ({ item: d.item, price: d.price, profit: d.profit, why: `${Math.round(d.pct * 100)}% of market` })),
+  ];
+  let seen: Record<string, number> = {};
+  try {
+    seen = JSON.parse(localStorage.getItem(NOTIFIED_KEY) ?? '{}');
+  } catch {
+    /* ignore */
+  }
+  const fresh = found.filter((d) => seen[d.item] !== d.price).sort((a, b) => b.profit - a.profit);
+  if (!fresh.length) return;
+  for (const d of found) seen[d.item] = d.price;
+  try {
+    localStorage.setItem(NOTIFIED_KEY, JSON.stringify(seen));
+  } catch {
+    /* ignore */
+  }
+  const lines = fresh.slice(0, 4).map((d) => `${data.items.get(d.item)?.name ?? d.item}: ${d.why}, ~${moneyText(d.profit)} profit`);
+  const n = new Notification(`${fresh.length} new deal${fresh.length > 1 ? 's' : ''} on the AH`, { body: lines.join('\n'), tag: 'forever-flips-deals' });
+  n.onclick = () => {
+    window.focus();
+    location.hash = '#/deals';
+  };
 }
 
 function fetchButton(): HTMLElement | null {
@@ -136,6 +178,9 @@ async function render() {
     case 'inventory': view = renderInventory(state); break;
     case 'changes': view = renderChanges(state); break;
     case 'items': view = renderItems(state); break;
+    case 'deals': view = renderDeals(state); break;
+    case 'learn': view = renderLearn(state); break;
+    case 'leveling': view = renderLeveling(state); break;
     case 'settings': view = await renderSettings(state, refresh); break;
     default: view = renderCrafts(state, () => void render());
   }

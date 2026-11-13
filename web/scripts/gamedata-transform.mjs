@@ -91,6 +91,7 @@ export function transform(t, build) {
       out.item,
       out.qty,
       reag,
+      num(a.MinSkillLineRank), // skill needed to learn it (0 if the table has no such column)
     ]);
   }
   recipes.sort((x, y) => x[0] - y[0]);

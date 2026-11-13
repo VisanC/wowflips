@@ -363,6 +363,15 @@ function renderDetail(row: Row, state: AppState, engines: Record<Strategy, Engin
   );
 }
 
+/** The plan panel (presets, buy/craft table, shopping list) for any recipe, e.g. from the Learn or Leveling tabs. */
+export function recipePanel(state: AppState, r: Recipe): HTMLElement {
+  const base = engineOptions(state);
+  const engines = Object.fromEntries(STRATEGIES.map((s) => [s, new Engine(state.data, state.market, { ...base, strategy: s })])) as Record<Strategy, Engine>;
+  const inv = inventory(state.char).total;
+  const row: Row = { best: engines.best.evaluate(r, inv), buy: engines.buy.evaluate(r, inv), craft: engines.craft.evaluate(r, inv) };
+  return renderDetail(row, state, engines, inv);
+}
+
 export function renderCrafts(state: AppState, rerender: () => void): HTMLElement {
   const { data, settings, char, latest } = state;
   if (settings.craftMode === 'none') settings.craftMode = 'known';
