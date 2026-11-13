@@ -166,7 +166,7 @@ await page.$$eval('main table tbody tr', (r) => r.find((x) => x.innerText.starts
 await page.waitForSelector('tr.detail p.flow');
 console.log('rifle flow:', await text('tr.detail p.flow'));
 await page.$eval('tr.detail input.qty', (el) => { el.value = '4'; });
-await page.click('tr.detail details.option summary button');
+await page.click('tr.detail .row button.primary');
 await page.waitForSelector('tr.detail .shopping');
 console.log('shopping tail:', (await text('tr.detail .shopping .totals')) + ' / ' + (await page.$$eval('tr.detail .shopping p', (p) => p.map((x) => x.innerText).filter((t) => t.includes('days') || t.includes('None sold')).join(' '))));
 await page.screenshot({ path: `${shots}/blizzard-crafts-flow.png`, fullPage: true });

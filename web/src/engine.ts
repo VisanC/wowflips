@@ -37,6 +37,8 @@ export interface EngineOptions {
   craftMode: CraftMode; // which recipes may be used for sub-components
   known: Set<number>; // spell ids you know
   strategy?: Strategy; // default 'best'
+  /** Per-item choices that override the strategy (the user flipped a part to buy or craft). */
+  overrides?: Map<number, 'buy' | 'craft'>;
 }
 
 export type Source =
@@ -44,6 +46,17 @@ export type Source =
   | { kind: 'vendor'; unit: number }
   | { kind: 'craft'; unit: number; recipe: Recipe; parts: Part[] }
   | { kind: 'none'; unit: number };
+
+export type CraftSource = Extract<Source, { kind: 'craft' }>;
+
+/** Why an item is bought or crafted. saving = per unit, the other way minus the chosen way (negative: the plan costs more). */
+export interface Choice {
+  buy: Source;
+  craft?: CraftSource;
+  pick: 'buy' | 'craft' | 'none';
+  reason: 'cheaper' | 'tie-craft' | 'tie-buy' | 'plan' | 'no-recipe' | 'not-sold' | 'no-price';
+  saving: number;
+}
 
 export interface Part {
   item: number;
@@ -97,31 +110,56 @@ export class Engine {
     return best;
   }
 
+  /** Cheapest way to craft one unit, with reagents got this engine's way; undefined if no usable recipe has prices. */
+  craftSource(item: number, path: Set<number> = new Set()): CraftSource | undefined {
+    let crafted: CraftSource | undefined;
+    for (const r of this.data.recipesByOutput.get(item) ?? []) {
+      if (!this.recipeAllowed(r) || path.has(r.spell)) continue;
+      const next = new Set(path).add(r.spell);
+      const { cost, parts, complete } = this.reagentCost(r, next);
+      if (!complete) continue;
+      const unit = cost / r.qty;
+      if (!crafted || unit < crafted.unit) crafted = { kind: 'craft', unit, recipe: r, parts };
+    }
+    return crafted;
+  }
+
   /** How to get one unit of `item` under this engine's strategy. */
   unitCost(item: number, path: Set<number> = new Set()): Source {
     const cached = this.memo.get(item);
     if (cached) return cached;
 
     const bought = this.marketSource(item);
+    const mode = this.opts.overrides?.get(item) ?? this.strategy;
     let best: Source = bought;
-    if (this.strategy !== 'buy') {
-      let crafted: Source | undefined;
-      for (const r of this.data.recipesByOutput.get(item) ?? []) {
-        if (!this.recipeAllowed(r) || path.has(r.spell)) continue;
-        const next = new Set(path).add(r.spell);
-        const { cost, parts, complete } = this.reagentCost(r, next);
-        if (!complete) continue;
-        const unit = cost / r.qty;
-        if (!crafted || unit < crafted.unit) crafted = { kind: 'craft', unit, recipe: r, parts };
-      }
+    // Buying wins in "buy" mode, unless nobody sells it.
+    if (mode !== 'buy' || !Number.isFinite(bought.unit)) {
+      const crafted = this.craftSource(item, path);
       // On a tie (within half a copper) craft from the cheaper raw material, e.g. smelt ore rather than buy bars.
-        if (crafted && (this.strategy === 'craft' || crafted.unit <= bought.unit + TIE)) best = crafted;
+      if (crafted && (mode === 'craft' || crafted.unit <= bought.unit + TIE)) best = crafted;
     }
 
     // Only memoize results computed outside a crafting chain; inside one,
     // the result can depend on which recipes are excluded by `path`.
     if (path.size === 0) this.memo.set(item, best);
     return best;
+  }
+
+  /** Both ways to get one unit, which one this strategy picks, and why. */
+  explain(item: number, chosen: Source = this.unitCost(item)): Choice {
+    const buy = this.marketSource(item);
+    const craft = chosen.kind === 'craft' ? chosen : this.craftSource(item);
+    const canBuy = Number.isFinite(buy.unit);
+    const pick: Choice['pick'] = chosen.kind === 'craft' ? 'craft' : canBuy ? 'buy' : 'none';
+    let reason: Choice['reason'];
+    if (pick === 'none') reason = 'no-price';
+    else if (!craft) reason = 'no-recipe';
+    else if (!canBuy) reason = 'not-sold';
+    else if (Math.abs(craft.unit - buy.unit) <= TIE) reason = pick === 'craft' ? 'tie-craft' : 'tie-buy';
+    else if (pick === 'craft') reason = craft.unit < buy.unit ? 'cheaper' : 'plan';
+    else reason = buy.unit < craft.unit ? 'cheaper' : 'plan';
+    const other = pick === 'craft' ? buy.unit : craft?.unit;
+    return { buy, craft, pick, reason, saving: other !== undefined && Number.isFinite(other) ? other - chosen.unit : 0 };
   }
 
   private reagentCost(r: Recipe, path: Set<number>) {

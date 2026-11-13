@@ -147,3 +147,36 @@ input.qty { width: 5.5rem; }
 .pct.pos { color: var(--ok); }
 .pct.neg { color: var(--bad, #e57373); }
 p.flow { margin: 0.4rem 0; }
+
+.alt { color: var(--muted); font-size: 0.86rem; text-decoration: line-through; text-decoration-color: rgba(255,255,255,0.25); }
+.why { font-size: 0.82rem; margin-left: 0.25rem; }
+.why.good { color: var(--ok); }
+.cheaper { color: var(--ok); font-weight: 600; }
+.decisions { margin: 0.5rem 0 0.75rem; }
+.decisions h4 { margin: 0 0 0.25rem; font-size: 0.9rem; color: var(--accent-2); }
+.opt-hint { display: block; font-weight: 400; font-size: 0.78rem; color: var(--muted); }
+details.alt-tree > summary { cursor: pointer; color: var(--muted); font-size: 0.82rem; list-style: none; margin-left: 0.5rem; }
+details.alt-tree > summary::before { content: '▸ '; }
+details.alt-tree[open] > summary::before { content: '▾ '; }
+details.alt-tree > .tree { opacity: 0.75; }
+
+/* Crafts plan: presets, one recursive table with Buy/Craft switches */
+.presets { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: stretch; margin: 0.6rem 0; }
+.presets > button { display: flex; flex-direction: column; align-items: flex-start; gap: 0.15rem; padding: 0.45rem 0.75rem; min-width: 11rem; text-align: left; border: 1px solid var(--line); background: var(--bg); border-radius: 8px; }
+.presets > button.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.presets .p-label { font-weight: 600; }
+.presets .p-cost { display: flex; gap: 0.4rem; align-items: center; }
+.presets .p-hint { font-size: 0.75rem; color: var(--muted); }
+.presets .custom { align-self: center; }
+.plan-summary { margin: 0.25rem 0 0.5rem; }
+table.plan { width: 100%; }
+table.plan td.part { white-space: nowrap; }
+table.plan .branch { color: var(--muted); }
+table.plan tr.d1 td, table.plan tr.d2 td, table.plan tr.d3 td, table.plan tr.d4 td, table.plan tr.d5 td, table.plan tr.d6 td { background: rgba(255,255,255,0.015); }
+table.plan td.cheaper { box-shadow: inset 0 -2px 0 var(--ok); }
+table.plan td.cheaper .money { font-weight: 600; }
+table.plan tfoot td { font-weight: 600; border-top: 1px solid var(--line); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button { border: none; border-radius: 0; padding: 0.15rem 0.6rem; background: transparent; color: var(--muted); font-size: 0.85rem; }
+.seg button.on { background: var(--accent); color: #1a1405; font-weight: 600; }
+.small { font-size: 0.82rem; }

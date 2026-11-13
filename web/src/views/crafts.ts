@@ -1,12 +1,17 @@
-import { Engine, STRATEGY_LABEL, type CraftEval, type Part, type Source, type Strategy } from '../engine';
+import { Engine, STRATEGY_LABEL, type Choice, type CraftEval, type Part, type Source, type Strategy } from '../engine';
 import { flowCell, flowLine, hoursText, rate } from '../flowView';
 import { BONUS_ITEMS, gathersFor, skillName, skillRank } from '../gather';
 import { buildShoppingList, shoppingListText, type ShoppingList } from '../shopping';
 import { engineOptions, flowFor, inventory, knownSpells, saveSettings, type AppState } from '../state';
 import type { Recipe } from '../types';
-import { ago, h, itemLink, money, moneyText, nodes, notice, signedPct, table, type Child } from '../ui';
+import { ago, h, itemLink, money, moneyText, nodes, notice, signedPct, table } from '../ui';
 
 const STRATEGIES: Strategy[] = ['best', 'buy', 'craft'];
+const STRATEGY_HINT: Record<Strategy, string> = {
+  best: 'buy or craft each part, whichever is cheaper',
+  buy: 'buy every part ready-made',
+  craft: 'craft every part you can',
+};
 
 interface Row {
   best: CraftEval;
@@ -14,38 +19,25 @@ interface Row {
   craft: CraftEval;
 }
 
-function sourceLabel(s: Source, state: AppState): Child {
-  switch (s.kind) {
-    case 'ah':
-      return h('span', { class: 'src ah' }, 'buy on AH ', money(s.unit));
-    case 'vendor':
-      return h('span', { class: 'src vendor' }, 'buy from vendor ', money(s.unit));
-    case 'craft':
-      return h('span', { class: 'src craft' }, `craft (${s.recipe.name}) `, money(s.unit), ' each');
-    default:
-      return h('span', { class: 'src none' }, 'no price', state.latest ? '' : ' (import an AH scan)');
-  }
+/** One line of the plan: a part, how many one craft needs, and both ways to get it. */
+interface PlanRow {
+  item: number;
+  need: number;
+  depth: number;
+  source: Source;
+  choice: Choice;
 }
 
-function partsTree(parts: Part[], state: AppState): HTMLElement {
-  return h(
-    'ul',
-    { class: 'tree' },
-    parts.map((p) => {
-      const item = state.data.items.get(p.item);
-      return h(
-        'li',
-        {},
-        `${p.count} × `,
-        itemLink(p.item, item?.name, item?.quality),
-        ' — ',
-        sourceLabel(p.source, state),
-        Number.isFinite(p.source.unit) ? h('span', { class: 'muted' }, ' = ', money(p.source.unit * p.count)) : null,
-        p.source.kind === 'craft' ? partsTree(p.source.parts, state) : null,
-      );
-    }),
-  );
+function planRows(parts: Part[], mult: number, depth: number, engine: Engine, out: PlanRow[] = []): PlanRow[] {
+  for (const p of parts) {
+    const need = p.count * mult;
+    out.push({ item: p.item, need, depth, source: p.source, choice: engine.explain(p.item, p.source) });
+    if (p.source.kind === 'craft') planRows(p.source.parts, need / p.source.recipe.qty, depth + 1, engine, out);
+  }
+  return out;
 }
+
+const qtyText = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/\.?0+$/, ''));
 
 export function filterRecipes(state: AppState): Recipe[] {
   const { data, settings, char } = state;
@@ -226,60 +218,146 @@ function renderDetail(row: Row, state: AppState, engines: Record<Strategy, Engin
   const { data } = state;
   const r = row.best.recipe;
   const product = data.items.get(r.out);
+  const base = engineOptions(state);
+  let strategy: Strategy = 'best';
+  const overrides = new Map<number, 'buy' | 'craft'>();
   const qtyInput = h('input', { type: 'number', min: 1, max: 1000, value: String(Math.max(1, row.best.craftableNow || 1)), class: 'qty' });
   const useStock = h('input', { type: 'checkbox', checked: true });
   const listBox = h('div');
+  const body = h('div');
 
-  const options = STRATEGIES.map((s) => ({ strategy: s, ev: row[s] })).sort((a, b) => {
-    if (a.ev.complete !== b.ev.complete) return a.ev.complete ? -1 : 1;
-    return a.ev.cost - b.ev.cost || STRATEGIES.indexOf(a.strategy) - STRATEGIES.indexOf(b.strategy);
-  });
-  const cheapest = options[0].ev.cost;
+  const planEngine = () => (overrides.size ? new Engine(data, state.market, { ...base, strategy, overrides }) : engines[strategy]);
+  const planName = () => (overrides.size ? 'Custom mix' : STRATEGY_LABEL[strategy]);
+  const cheapestCost = Math.min(...STRATEGIES.map((s) => (row[s].complete ? row[s].cost : Infinity)));
 
-  const makeList = (strategy: Strategy) => {
-    const crafts = Math.max(1, Math.min(1000, Math.floor(Number(qtyInput.value) || 1)));
-    const list = buildShoppingList(data, state.market, engines[strategy], r, crafts, {
-      inventory: useStock.checked ? inv : undefined,
-      cut: state.settings.cut,
-    });
-    listBox.replaceChildren(renderShoppingList(list, STRATEGY_LABEL[strategy], state));
-    listBox.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  const toggle = (item: number, use: 'buy' | 'craft') => {
+    overrides.set(item, use);
+    listBox.replaceChildren();
+    draw();
   };
+
+  const planRow = (pr: PlanRow) => {
+    const it = data.items.get(pr.item);
+    const c = pr.choice;
+    const buyOk = Number.isFinite(c.buy.unit);
+    const craft = c.craft;
+    const chosen: 'buy' | 'craft' = pr.source.kind === 'craft' ? 'craft' : 'buy';
+    const cheaper =
+      buyOk && craft ? (Math.abs(c.buy.unit - craft.unit) <= 0.5 ? 'tie' : c.buy.unit < craft.unit ? 'buy' : 'craft') : buyOk ? 'buy' : craft ? 'craft' : 'none';
+    const extra = chosen !== cheaper && cheaper !== 'tie' && buyOk && craft ? Math.abs(c.buy.unit - craft.unit) : 0;
+
+    const use =
+      buyOk && craft
+        ? h(
+            'div',
+            { class: 'seg' },
+            (['buy', 'craft'] as const).map((u) =>
+              h('button', { class: u === chosen ? 'on' : '', onclick: (e: Event) => { e.stopPropagation(); toggle(pr.item, u); } }, u === 'buy' ? 'Buy' : 'Craft'),
+            ),
+          )
+        : h('span', { class: 'muted small' }, craft ? 'craft (not sold)' : buyOk ? 'buy' : 'no price');
+
+    return h(
+      'tr',
+      { class: `d${Math.min(pr.depth, 6)}${chosen === 'craft' ? ' crafted' : ''}` },
+      h(
+        'td',
+        { class: 'part', style: { paddingLeft: `${0.5 + pr.depth * 1.4}rem` } },
+        pr.depth ? h('span', { class: 'branch' }, '└ ') : null,
+        itemLink(pr.item, it?.name, it?.quality),
+        pr.source.kind === 'craft' && (pr.source.recipe.name !== it?.name || pr.source.recipe.qty > 1)
+          ? h('span', { class: 'muted small' }, ` · ${pr.source.recipe.name !== it?.name ? pr.source.recipe.name : ''}${pr.source.recipe.qty > 1 ? ` makes ${pr.source.recipe.qty}` : ''}`)
+          : null,
+      ),
+      h('td', { class: 'num' }, qtyText(pr.need)),
+      h(
+        'td',
+        { class: `num${cheaper === 'buy' && craft ? ' cheaper' : ''}` },
+        buyOk ? [money(c.buy.unit), h('span', { class: 'muted small' }, c.buy.kind === 'vendor' ? ' vendor' : ' AH')] : h('span', { class: 'muted small' }, 'not sold'),
+      ),
+      h('td', { class: `num${cheaper === 'craft' && buyOk ? ' cheaper' : ''}` }, craft ? money(craft.unit) : h('span', { class: 'muted small' }, '—')),
+      h('td', {}, use, extra ? h('div', { class: 'warn-text small' }, cheaper === 'buy' ? 'buying is ' : 'crafting is ', money(extra), ' cheaper each') : null),
+      h('td', { class: 'num' }, Number.isFinite(pr.source.unit) ? money(pr.source.unit * pr.need) : '—'),
+    );
+  };
+
+  const draw = () => {
+    const engine = planEngine();
+    const ev = engine.evaluate(r, inv);
+    const rows = planRows(ev.parts, 1, 0, engine);
+
+    const presets = h(
+      'div',
+      { class: 'presets' },
+      STRATEGIES.map((s) => {
+        const pe = row[s];
+        const active = !overrides.size && s === strategy;
+        const isCheapest = pe.complete && Math.abs(pe.cost - cheapestCost) < 0.5;
+        return h(
+          'button',
+          { class: active ? 'active' : '', title: STRATEGY_HINT[s], onclick: () => { strategy = s; overrides.clear(); listBox.replaceChildren(); draw(); } },
+          h('span', { class: 'p-label' }, STRATEGY_LABEL[s]),
+          h('span', { class: 'p-cost' }, pe.complete ? money(pe.cost) : 'missing prices', isCheapest ? h('span', { class: 'tag ah' }, 'cheapest') : null),
+          h('span', { class: 'p-hint' }, STRATEGY_HINT[s]),
+        );
+      }),
+      overrides.size ? h('span', { class: 'custom' }, h('span', { class: 'tag' }, 'custom mix'), ' ', h('button', { class: 'link small', onclick: () => { overrides.clear(); draw(); } }, 'reset')) : null,
+    );
+
+    const makeBtn = h('button', { class: 'primary' }, `Shopping list: ${planName()}`);
+    makeBtn.addEventListener('click', () => {
+      const crafts = Math.max(1, Math.min(1000, Math.floor(Number(qtyInput.value) || 1)));
+      const list = buildShoppingList(data, state.market, planEngine(), r, crafts, { inventory: useStock.checked ? inv : undefined, cut: state.settings.cut });
+      listBox.replaceChildren(renderShoppingList(list, planName(), state));
+      listBox.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+
+    body.replaceChildren(
+      ...nodes(
+        presets,
+        h(
+          'div',
+          { class: 'plan-summary' },
+          h('strong', {}, planName()),
+          ': cost ',
+          ev.complete ? money(ev.cost) : h('span', { class: 'muted' }, 'missing prices'),
+          ' → sells for ',
+          money(ev.revenue),
+          ev.complete ? [' → profit ', money(ev.profit, { signed: true }), ' ', pctTag(ev)] : null,
+        ),
+        h(
+          'table',
+          { class: 'plan compact' },
+          h(
+            'thead',
+            {},
+            h(
+              'tr',
+              {},
+              h('th', {}, `Parts for 1 craft`),
+              h('th', { class: 'num' }, 'Need'),
+              h('th', { class: 'num', title: 'Cheapest on the AH, or from a vendor' }, 'Buy each'),
+              h('th', { class: 'num', title: 'Crafting one, with the choices made for its own parts below' }, 'Craft each'),
+              h('th', {}, 'Use'),
+              h('th', { class: 'num' }, 'Subtotal'),
+            ),
+          ),
+          h('tbody', {}, rows.map(planRow)),
+          h('tfoot', {}, h('tr', {}, h('td', { colSpan: 5 }, 'Total for 1 craft'), h('td', { class: 'num' }, ev.complete ? money(ev.cost) : '—'))),
+        ),
+        h('p', { class: 'muted small' }, 'Green = the cheaper way for that part. Switch any part between Buy and Craft: crafting it opens its own parts underneath.'),
+        h('div', { class: 'row' }, h('label', { class: 'field' }, 'Crafts ', qtyInput), h('label', { class: 'field' }, useStock, ' use what I have in bags & bank'), makeBtn),
+      ),
+    );
+  };
+  draw();
 
   return h(
     'div',
     { class: 'chain' },
     h('div', {}, h('strong', {}, r.name), ` makes ${r.qty} × `, itemLink(r.out, product?.name, product?.quality), '. Lowest on AH: ', money(row.best.ahUnit), ` (${row.best.ahQty} listed), vendor pays `, money(row.best.vendorUnit), '.'),
     flowLine(state, r.out, row.best.ahQty),
-    h(
-      'div',
-      { class: 'row' },
-      h('label', { class: 'field' }, 'Crafts ', qtyInput),
-      h('label', { class: 'field' }, useStock, ' use what I have in bags & bank'),
-    ),
-    options.map(({ strategy, ev }, i) => {
-      const same = i > 0 && ev.complete && Math.abs(ev.cost - cheapest) < 0.5;
-      const btn = h('button', { class: i === 0 ? 'primary' : '' }, 'Shopping list');
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        makeList(strategy);
-      });
-      return h(
-        'details',
-        { class: `option${i === 0 ? ' best' : ''}`, open: i === 0 },
-        h(
-          'summary',
-          {},
-          h('span', { class: 'opt-label' }, STRATEGY_LABEL[strategy]),
-          i === 0 ? h('span', { class: 'tag ah' }, 'cheapest') : same ? h('span', { class: 'tag' }, 'same cost') : null,
-          h('span', { class: 'opt-cost' }, ev.complete ? ['cost ', money(ev.cost)] : h('span', { class: 'muted' }, 'missing prices')),
-          ev.complete ? h('span', { class: 'opt-profit' }, 'profit ', money(ev.profit, { signed: true }), ' ', pctTag(ev)) : null,
-          i > 0 && ev.complete && !same ? h('span', { class: 'muted small' }, ' +', money(ev.cost - cheapest), ' vs cheapest') : null,
-          btn,
-        ),
-        partsTree(ev.parts, state),
-      );
-    }),
+    body,
     listBox,
   );
 }

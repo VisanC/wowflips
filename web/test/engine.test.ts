@@ -176,6 +176,28 @@ describe('strategies', () => {
     expect(costs[0]).toBeLessThanOrEqual(costs[2]);
   });
 
+  it('explains each choice with the price of the other way', () => {
+    const best = engine('best');
+    // bronze bar: smelting (157) beats buying (175)
+    expect(best.explain(2841)).toMatchObject({ pick: 'craft', reason: 'cheaper', saving: 18, buy: { kind: 'ah', unit: 175 } });
+    // tube: buying (399) beats crafting (414)
+    expect(best.explain(4371)).toMatchObject({ pick: 'buy', reason: 'cheaper', saving: 15 });
+    expect(best.explain(4371).craft?.unit).toBe(414);
+    // plans that ignore price say what they cost you
+    expect(engine('buy').explain(2841)).toMatchObject({ pick: 'buy', reason: 'plan', saving: -18 });
+    expect(engine('craft').explain(4371)).toMatchObject({ pick: 'craft', reason: 'plan', saving: -15 });
+    // raw materials have no recipe
+    expect(best.explain(4400)).toMatchObject({ pick: 'buy', reason: 'no-recipe' });
+  });
+
+  it('per-item overrides beat the strategy, and buy mode still crafts what nobody sells', () => {
+    const e = new Engine(data, market, { ...opts(known), strategy: 'best', overrides: new Map([[4371, 'craft']]) });
+    expect(e.unitCost(4371).kind).toBe('craft'); // forced, although buying is cheaper
+    expect(e.unitCost(4375).kind).toBe('ah'); // untouched: cheapest
+    const noTubes = { ah: new Map([...market.ah].filter(([id]) => id !== 4371)), vendor };
+    expect(new Engine(data, noTubes, { ...opts(known), strategy: 'buy' }).unitCost(4371).kind).toBe('craft');
+  });
+
   it('prices AH purchases along the listed levels', () => {
     expect(ahBuyCost(market, 4371, 3)).toEqual({ total: 3 * 399, estimated: false });
     expect(ahBuyCost(market, 4371, 15)).toEqual({ total: 5 * 399 + 10 * 420, estimated: false });

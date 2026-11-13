@@ -45,19 +45,27 @@ await page.waitForSelector('tr.detail');
 console.log('top row chain:', (await text('tr.detail')).replace(/\s+/g, ' ').slice(0, 400));
 await page.screenshot({ path: `${shots}/crafts.png`, fullPage: true });
 
-// the three options, cheapest first, then a shopping list for each at qty 3
-const options = await page.$$eval('tr.detail details.option > summary', (s) => s.map((x) => x.innerText.replace(/\s+/g, ' ')));
-console.log('options (ranked):\n  ' + options.join('\n  '));
-const costs = await page.$$eval('tr.detail details.option .opt-cost', (s) => s.map((x) => x.innerText));
-console.log('option costs:', costs.join(' | '));
-await page.$eval('tr.detail input.qty', (el) => { el.value = '3'; });
-const btnCount = (await page.$$('tr.detail details.option summary button')).length;
-for (let i = 0; i < btnCount; i++) {
-  const btns = await page.$$('tr.detail details.option summary button');
-  await btns[i].click();
+// presets with their costs, the plan table, and a shopping list for each preset at qty 3
+const presets = await page.$$eval('tr.detail .presets > button', (b) => b.map((x) => x.innerText.replace(/\s+/g, ' ')));
+console.log('presets:\n  ' + presets.join('\n  '));
+const planRows = async () => page.$$eval('tr.detail table.plan tbody tr', (r) => r.map((x) => x.innerText.replace(/\s+/g, ' ')));
+console.log('plan (cheapest):\n  ' + (await planRows()).join('\n  '));
+for (let i = 0; i < presets.length; i++) {
+  await page.$$eval('tr.detail .presets > button', (b, i) => b[i].click(), i);
+  await page.$eval('tr.detail input.qty', (el) => { el.value = '3'; });
+  await page.click('tr.detail .row button.primary');
   await page.waitForSelector('tr.detail .shopping');
-  console.log(`shopping list #${i + 1}:`, (await text('tr.detail .shopping')).replace(/\s+/g, ' ').slice(0, 600));
+  console.log(`shopping list #${i + 1}:`, (await text('tr.detail .shopping')).replace(/\s+/g, ' ').slice(0, 500));
 }
+// back to cheapest, then flip Bronze Tube to Craft: its parts open underneath and the plan becomes custom
+await page.$$eval('tr.detail .presets > button', (b) => b[0].click());
+await page.$$eval('tr.detail table.plan tbody tr', (r) => r.find((x) => x.innerText.startsWith('Bronze Tube')).querySelectorAll('.seg button')[1].click());
+console.log('plan (tube crafted):\n  ' + (await planRows()).join('\n  '));
+console.log('summary:', await text('tr.detail .plan-summary'), '| presets bar:', await text('tr.detail .presets'));
+await page.screenshot({ path: `${shots}/crafts-plan.png`, fullPage: true });
+await page.click('tr.detail .row button.primary');
+await page.waitForSelector('tr.detail .shopping');
+console.log('custom shopping list:', (await text('tr.detail .shopping')).replace(/\s+/g, ' ').slice(0, 500));
 await page.screenshot({ path: `${shots}/crafts-shopping.png`, fullPage: true });
 
 // "Sub-crafts: any recipe" re-renders without errors
