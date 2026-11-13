@@ -1,8 +1,8 @@
 import { Engine, STRATEGY_LABEL, type Choice, type CraftEval, type Part, type Source, type Strategy } from '../engine';
-import { flowCell, flowLine, hoursText, rate } from '../flowView';
+import { flowLine, rate, salesCell, soldPerDay } from '../flowView';
 import { BONUS_ITEMS, gathersFor, skillName, skillRank } from '../gather';
 import { buildShoppingList, shoppingListText, type ShoppingList } from '../shopping';
-import { engineOptions, flowFor, inventory, knownSpells, saveSettings, type AppState } from '../state';
+import { engineOptions, inventory, knownSpells, saveSettings, type AppState } from '../state';
 import type { Recipe } from '../types';
 import { ago, h, itemLink, money, moneyText, nodes, notice, signedPct, table } from '../ui';
 
@@ -79,13 +79,14 @@ function renderShoppingList(list: ShoppingList, label: string, state: AppState):
   const product = data.items.get(list.recipe.out);
   const units = list.crafts * list.recipe.qty;
   const invested = list.cashNeeded + list.stockValue;
-  const f = flowFor(state, list.recipe.out);
-  const sellTime = !f
-    ? null
-    : f.perDay > 0
-      ? h('p', { class: units > f.perDay ? 'warn-text' : 'muted small' },
-          `At the current rate (${rate(f.perDay)} a day sold, everyone's listings included) selling ${units} takes about ${(units / f.perDay).toFixed(1)} days.`)
-      : h('p', { class: 'warn-text' }, `None sold in the last ${hoursText(f.hours)} of data: these may sit on the AH a long time.`);
+  const perDay = soldPerDay(state, list.recipe.out);
+  const sellTime =
+    perDay === undefined
+      ? null
+      : perDay > 0
+        ? h('p', { class: units > perDay ? 'warn-text' : 'muted small' },
+            `About ${rate(perDay)} sell a day (all sellers together), so ${units} is about ${(units / perDay).toFixed(1)} days of the whole market.`)
+        : h('p', { class: 'warn-text' }, 'Hardly any sell: these may sit on the AH a long time.');
 
   return h(
     'div',
@@ -372,7 +373,7 @@ export function renderCrafts(state: AppState, rerender: () => void): HTMLElement
     .filter((r) => data.items.has(r.out))
     .map((r) => ({ best: engines.best.evaluate(r, inv), buy: engines.buy.evaluate(r, inv), craft: engines.craft.evaluate(r, inv) }));
   // Gathered items (ore, herbs, leather, fish): free to make, so "profit" is what they sell for.
-  for (const g of gathersFor(data, char, settings.recipeScope)) {
+  for (const g of settings.hideGathered ? [] : gathersFor(data, char, settings.recipeScope)) {
     const e = { ...engines.best.evaluate(g, inv), craftableNow: inv.get(g.out) ?? 0, margin: NaN };
     rows.push({ best: e, buy: e, craft: e });
   }
@@ -411,6 +412,7 @@ export function renderCrafts(state: AppState, rerender: () => void): HTMLElement
     ),
     h('label', {}, h('input', { type: 'checkbox', onchange: (e: Event) => { filters.profitable = (e.target as HTMLInputElement).checked; draw(); } }), ' profitable only'),
     h('label', {}, h('input', { type: 'checkbox', onchange: (e: Event) => { filters.makeable = (e.target as HTMLInputElement).checked; draw(); } }), ' can make now'),
+    h('label', { title: 'Leave out ore, herbs, leather and fish' }, h('input', { type: 'checkbox', checked: settings.hideGathered, onchange: (e: Event) => { settings.hideGathered = (e.target as HTMLInputElement).checked; saveSettings(settings); rerender(); } }), ' hide gathered'),
   );
 
   const results = h('div');
@@ -457,9 +459,9 @@ export function renderCrafts(state: AppState, rerender: () => void): HTMLElement
           {
             label: 'Sold/day',
             numeric: true,
-            title: 'Estimated from the hourly Blizzard snapshots (all sellers). Low numbers mean it sells slowly.',
-            value: (r) => flowFor(state, r.best.recipe.out)?.perDay ?? -1,
-            render: (r) => flowCell(flowFor(state, r.best.recipe.out), r.best.ahQty),
+            title: 'Units sold per day by all sellers: TradeSkillMaster region data, or measured on your AH. Hover a number for details.',
+            value: (r) => soldPerDay(state, r.best.recipe.out) ?? -1,
+            render: (r) => salesCell(state, r.best.recipe.out, r.best.ahQty),
           },
           { label: 'Profit', numeric: true, title: 'Per craft using the best mix; for gathered items, what one sells for', value: (r) => (r.best.complete ? r.best.profit : -Infinity), render: (r) => (r.best.complete ? money(r.best.profit, { signed: true }) : '—') },
           { label: 'Profit %', numeric: true, title: 'Profit as a share of what the best mix costs (none for gathered items: they cost only time)', value: (r) => (r.best.complete && Number.isFinite(r.best.margin) ? r.best.margin : -Infinity), render: (r) => (r.best.recipe.gather ? h('span', { class: 'muted' }, 'free') : r.best.complete ? pctTag(r.best) : '—') },

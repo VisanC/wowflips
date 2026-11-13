@@ -2,6 +2,7 @@ import { db, latestSnapshots, loadThroughput } from './db';
 import { ahMap, vendorPrices, type CraftMode, type EngineOptions, type Market } from './engine';
 import type { GameData } from './gamedata';
 import { emptyFlow, houseKey, type Flow, type Throughput } from './throughput';
+import { loadTsm, type TsmData, type TsmRow } from './tsm';
 import type { AhRow, Character, Snapshot } from './types';
 import { VENDOR_REAGENTS } from './vendor';
 
@@ -17,10 +18,11 @@ export interface Settings {
   blizzHouse?: number;
   blizzHouseLabel?: string;
   autoFetch: boolean; // fetch Blizzard prices every hour while the page is open
+  hideGathered: boolean; // Crafts: leave out gathered items (ore, herbs, fish…)
 }
 
 const SETTINGS_KEY = 'forever-flips:settings';
-const DEFAULTS: Settings = { cut: 0.05, craftMode: 'known', recipeScope: 'known', blizzRegion: 'eu', blizzId: '', blizzSecret: '', autoFetch: true };
+const DEFAULTS: Settings = { cut: 0.05, craftMode: 'known', recipeScope: 'known', blizzRegion: 'eu', blizzId: '', blizzSecret: '', autoFetch: true, hideGathered: false };
 
 export function loadSettings(): Settings {
   try {
@@ -48,6 +50,8 @@ export interface AppState {
   market: Market;
   /** Sales rates from hourly Blizzard snapshots (undefined until the API is set up). */
   flow?: Throughput;
+  /** TradeSkillMaster's region data (sold per day, sale rate), if the site build fetched it. */
+  tsm?: TsmData;
 }
 
 export async function loadState(data: GameData, settings: Settings): Promise<AppState> {
@@ -61,11 +65,17 @@ export async function loadState(data: GameData, settings: Settings): Promise<App
   };
   const house = currentHouse(settings);
   const flow = house ? await loadThroughput(house) : undefined;
-  return { data, settings, chars, char, latest, previous, market, flow };
+  const tsm = await loadTsm(settings.blizzRegion || 'eu');
+  return { data, settings, chars, char, latest, previous, market, flow, tsm };
 }
 
 export function currentHouse(s: Settings): string | undefined {
   return s.blizzRuleset && s.blizzHouse ? houseKey(s.blizzRegion, s.blizzRuleset, s.blizzHouse) : undefined;
+}
+
+/** TSM's region numbers for one item. */
+export function tsmFor(state: AppState, item: number): TsmRow | undefined {
+  return state.tsm?.items.get(item);
 }
 
 /** Sales rate of one item, or undefined when there is no comparable data yet. */

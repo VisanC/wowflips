@@ -68,6 +68,18 @@ await page.waitForSelector('tr.detail .shopping');
 console.log('custom shopping list:', (await text('tr.detail .shopping')).replace(/\s+/g, ' ').slice(0, 500));
 await page.screenshot({ path: `${shots}/crafts-shopping.png`, fullPage: true });
 
+// sales column (TSM) and the hide-gathered toggle
+const rowCount = async () => page.$$eval('main table tbody tr', (r) => r.filter((x) => !x.classList.contains('detail') && !x.parentElement.closest('tr.detail')).length);
+const soldCol = await page.$$eval('main table thead th', (ths) => ths.findIndex((t) => t.innerText.startsWith('Sold/day')));
+console.log('sold/day for rifle:', await page.$$eval('main table tbody tr', (r, i) => { const row = r.find((x) => x.innerText.startsWith('Moonsight Rifle')); return row.children[i].innerText + ' | ' + row.children[i].querySelector('span')?.title; }, soldCol));
+console.log('rifle sales line:', (await page.$$eval('tr.detail p.flow', (p) => p.map((x) => x.innerText))).join(' / '));
+const before = await rowCount();
+await page.$$eval('main .controls label', (ls) => ls.find((l) => l.innerText.includes('hide gathered')).querySelector('input').click());
+await page.waitForFunction(() => ![...document.querySelectorAll('main table tbody tr')].some((x) => x.innerText.includes('gathered')));
+console.log(`hide gathered: ${before} rows -> ${await rowCount()} rows; gathered left: ${await page.$$eval('main table tbody tr', (r) => r.filter((x) => x.innerText.includes('gathered')).length)}`);
+await page.$$eval('main .controls label', (ls) => ls.find((l) => l.innerText.includes('hide gathered')).querySelector('input').click());
+await page.waitForFunction(() => [...document.querySelectorAll('main table tbody tr')].some((x) => x.innerText.includes('gathered')));
+
 // "Sub-crafts: any recipe" re-renders without errors
 await page.select('main .controls select:nth-of-type(3)', 'all');
 await page.waitForSelector('main table');
@@ -87,7 +99,8 @@ console.log('inventory:', (await text('main p')).replace(/\s+/g, ' '));
 await page.screenshot({ path: `${shots}/inventory.png`, fullPage: true });
 
 await go('changes');
-console.log('changes:', (await text('main')).replace(/\s+/g, ' ').slice(0, 500));
+console.log('changes:', (await text('main')).replace(/\s+/g, ' ').slice(0, 300));
+console.log('sells fastest:', await page.$$eval('main h2', (hs) => { const h = hs.find((x) => x.innerText === 'Sells fastest'); let el = h.nextElementSibling; const out = [el.innerText]; el = el.nextElementSibling; out.push(...[...el.querySelectorAll('tbody tr')].slice(0, 4).map((r) => r.innerText.replace(/\s+/g, ' '))); return out; }));
 await page.screenshot({ path: `${shots}/changes.png`, fullPage: true });
 
 await go('items');

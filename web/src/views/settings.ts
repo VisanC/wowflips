@@ -138,6 +138,13 @@ function blizzardSection(state: AppState, refresh: () => Promise<void>): HTMLEle
       h('input', { type: 'checkbox', checked: settings.autoFetch, onchange: (e: Event) => { settings.autoFetch = (e.target as HTMLInputElement).checked; save(); } }),
       ' Fetch new prices every hour while this site is open (a background tab is fine). Sales per day come from comparing these hourly snapshots.',
     ),
+    h(
+      'p',
+      { class: 'muted small' },
+      state.tsm
+        ? `TradeSkillMaster sales data (${state.tsm.region.toUpperCase()}): ${state.tsm.items.size.toLocaleString()} items, updated ${ago(state.tsm.updatedAt || state.tsm.fetchedAt)}. The site picks up a new file every 6 hours.`
+        : 'TradeSkillMaster sales data: not available for this region in the current site build.',
+    ),
     state.flow
       ? h('p', { class: 'muted small' }, state.flow.records
           ? `Sales data: ${state.flow.records} hourly comparisons in the last week (${hoursText(state.flow.hoursCommodities)} of commodities, ${hoursText(state.flow.hoursItems)} of gear and other items).`

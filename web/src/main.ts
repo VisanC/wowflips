@@ -39,10 +39,10 @@ async function refresh() {
 let headerMsg = '';
 let newDataWaiting = false;
 
-// Blizzard publishes a new snapshot about once an hour. Auto-fetch checks a little after the
-// next one is due, then every 10 minutes until it appears. Each fetch also records what sold.
-const RETRY_MS = 10 * 60_000;
-const AFTER_UPDATE_MS = 65 * 60_000;
+// Blizzard publishes a new snapshot about once an hour. Auto-fetch checks as soon as the
+// next one is due, then every 4 minutes until it appears. Each fetch also records what sold.
+const RETRY_MS = 4 * 60_000;
+const AFTER_UPDATE_MS = 61 * 60_000;
 let nextAuto = 0;
 let fetching = false;
 

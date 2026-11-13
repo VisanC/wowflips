@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   schedule:
-    - cron: '23 5 * * *' # daily: picks up new WoW Forever builds from wago.tools
+    - cron: '23 */6 * * *' # every 6 hours: new TSM sales data, and new WoW Forever builds from wago.tools
   workflow_dispatch:
 
 permissions:
@@ -35,6 +35,10 @@ jobs:
 
       - name: Download game data from wago.tools
         run: npm run data
+
+      - name: Download TradeSkillMaster sales data (optional)
+        run: node scripts/fetch-tsm.mjs
+        continue-on-error: true
 
       - name: Package the addon for download
         run: cd ../addon && zip -qr ../web/public/FlipExport.zip FlipExport

@@ -1,44 +1,65 @@
 import { ahMap, compareScans, type Change } from '../engine';
 import { hoursText, rate } from '../flowView';
 import type { AppState } from '../state';
-import { WINDOW_DAYS, type Flow } from '../throughput';
-import { ago, h, itemLink, money, notice, pct, table } from '../ui';
+import { WINDOW_DAYS } from '../throughput';
+import { TSM_CREDIT_URL } from '../tsm';
+import { ago, h, itemLink, money, notice, pct, table, type Child } from '../ui';
 
 interface Seller {
   item: number;
-  f: Flow;
+  perDay: number;
+  avg: number; // average price paid
+  saleRate?: number;
   listed: number;
   goldPerDay: number;
 }
 
-/** Items ranked by how much gold changes hands per day. */
+/** Items ranked by how much gold changes hands per day: TSM's region data, else our own measurement. */
 function fastestSellers(state: AppState): HTMLElement {
-  const { flow, data, market } = state;
+  const { flow, tsm, data, market } = state;
   const head = h('h2', {}, 'Sells fastest');
-  if (!flow || !(flow.hoursItems || flow.hoursCommodities)) {
-    return h('div', {}, head, h('p', { class: 'muted' }, 'Needs hourly Blizzard fetches: set up the Blizzard API in Settings and keep the site open with hourly fetching on. The first numbers appear after two fetches about an hour apart.'));
+  const listed = (item: number) => market.ah.get(item)?.qty ?? 0;
+  let rows: Seller[] = [];
+  let note: Child = null;
+  if (tsm && tsm.items.size) {
+    rows = [...tsm.items]
+      .filter(([, t]) => t.soldPerDay > 0)
+      .map(([item, t]) => {
+        const avg = t.avgSalePrice || t.marketValue;
+        return { item, perDay: t.soldPerDay, avg, saleRate: t.saleRate, listed: listed(item), goldPerDay: t.soldPerDay * avg };
+      });
+    note = [
+      `${tsm.region.toUpperCase()} region, all rulesets and both factions together, from `,
+      h('a', { href: TSM_CREDIT_URL, target: '_blank', rel: 'noopener' }, 'TradeSkillMaster'),
+      tsm.updatedAt ? ` (updated ${ago(tsm.updatedAt)})` : '',
+      '. "Listed" is your own auction house.',
+    ];
+  } else if (flow && (flow.hoursItems || flow.hoursCommodities)) {
+    rows = [...flow.flows]
+      .filter(([, f]) => f.sold > 0)
+      .map(([item, f]) => ({ item, perDay: f.perDay, avg: Number.isFinite(f.avg) ? f.avg : 0, listed: listed(item), goldPerDay: f.perDay * (Number.isFinite(f.avg) ? f.avg : 0) }));
+    note = `Measured on your auction house from ${flow.records} hourly comparisons (${hoursText(flow.hoursCommodities)} of commodity data, ${hoursText(flow.hoursItems)} of gear and other items) over the last ${WINDOW_DAYS} days.`;
+  } else {
+    return h('div', {}, head, h('p', { class: 'muted' }, 'No sales data yet.'));
   }
-  const rows: Seller[] = [...flow.flows]
-    .filter(([, f]) => f.sold > 0)
-    .map(([item, f]) => ({ item, f, listed: market.ah.get(item)?.qty ?? 0, goldPerDay: f.perDay * (Number.isFinite(f.avg) ? f.avg : 0) }));
   const name = (s: Seller) => data.items.get(s.item);
   return h(
     'div',
     {},
     head,
-    h('p', { class: 'muted small' }, `Estimated from ${flow.records} hourly comparisons (${hoursText(flow.hoursCommodities)} of commodity data, ${hoursText(flow.hoursItems)} of gear and other items) over the last ${WINDOW_DAYS} days. Gear counts can include cancelled auctions.`),
+    h('p', { class: 'muted small' }, note),
     table(
       rows,
       [
         { label: 'Item', value: (s) => name(s)?.name ?? '', render: (s) => itemLink(s.item, name(s)?.name, name(s)?.quality) },
-        { label: 'Sold/day', numeric: true, value: (s) => s.f.perDay, render: (s) => rate(s.f.perDay) },
-        { label: 'Avg price', numeric: true, title: 'Average price paid', value: (s) => s.f.avg, render: (s) => money(s.f.avg) },
+        { label: 'Sold/day', numeric: true, value: (s) => s.perDay, render: (s) => rate(s.perDay) },
+        { label: 'Avg price', numeric: true, title: 'Average price paid', value: (s) => s.avg, render: (s) => money(s.avg) },
         { label: 'Gold/day', numeric: true, title: 'Sold per day × average price: how much money moves through this item', value: (s) => s.goldPerDay, render: (s) => money(s.goldPerDay) },
-        { label: 'Listed now', numeric: true, value: (s) => s.listed },
-        { label: 'New/day', numeric: true, title: 'Units newly listed per day', value: (s) => s.f.listedPerDay, render: (s) => rate(s.f.listedPerDay) },
-        { label: 'Days of supply', numeric: true, title: 'Listed now ÷ sold per day', value: (s) => s.listed / s.f.perDay, render: (s) => (s.listed / s.f.perDay).toFixed(1) },
+        { label: 'Sale rate', numeric: true, title: 'Share of listings that sell (TSM)', value: (s) => s.saleRate ?? -1, render: (s) => (s.saleRate === undefined ? '—' : pct(s.saleRate)) },
+        { label: 'Listed', numeric: true, title: 'On your auction house now', value: (s) => s.listed },
+        { label: 'Days of supply', numeric: true, title: 'Listed ÷ sold per day', value: (s) => s.listed / s.perDay, render: (s) => (s.listed / s.perDay).toFixed(1) },
       ],
-      { sortBy: 3, desc: true, limit: 150, empty: 'Nothing has sold yet in the data collected.' },
+      { sortBy: 3, desc: true, limit: 150, empty: 'Nothing has sold yet in the data.' },
     ),
   );
 }
