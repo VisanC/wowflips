@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { underMarket, vendorFlips } from '../src/deals';
 import { ahMap, vendorPrices } from '../src/engine';
 import { buildGameData } from '../src/gamedata';
-import { colorAt, planLeveling, skillUpChance } from '../src/leveling';
+import { colorAt, learnLevel, learnLevelKnown, planLeveling, skillUpChance, skillUpsAt } from '../src/leveling';
 import { recipeItemFor } from '../src/recipeItems';
 import { parseTsmFile } from '../src/tsm';
 import type { Recipe } from '../src/types';
@@ -77,7 +77,24 @@ describe('leveling', () => {
   });
 
   it('learn level from the game data, or yellow when missing', () => {
-    expect(data.recipesBySpell.get(3954)!.learn).toBe(160);
-    expect(data.recipesBySpell.get(2659)!.learn).toBe(65);
+    expect(learnLevel(data.recipesBySpell.get(3954)!)).toBe(160);
+    expect(learnLevelKnown(data.recipesBySpell.get(2659)!)).toBe(false);
+    expect(learnLevel(data.recipesBySpell.get(2659)!)).toBe(65);
+  });
+
+  it('adds the cost of learning a recipe once, on its first step', () => {
+    const a = r(1, 100, 100, 110);
+    const b = r(2, 100, 140, 160);
+    const plan = planLeveling([a, b], 100, 120, () => 10, { learnCost: (x) => (x.spell === 2 ? 500 : 0) });
+    const learnSteps = plan.steps.filter((s) => s.learnCost > 0);
+    expect(learnSteps).toHaveLength(1);
+    expect(plan.total).toBeCloseTo(plan.steps.reduce((t, s) => t + s.netEach * s.crafts, 0) + 500);
+  });
+
+  it('lists every recipe that gives a point at a skill, cheapest per point first', () => {
+    const list = skillUpsAt([r(1, 100, 100, 130), r(2, 100, 140, 160), r(3, 100, 110, 120), r(4, 150, 160, 170)], 115, (x) => (x.spell === 2 ? 25 : 10));
+    expect(list.map((x) => x.recipe.spell)).toEqual([1, 3, 2]); // 4 can't be learned yet
+    expect(list[0]).toMatchObject({ chance: 0.5, perPoint: 20, color: 'green' }); // 115 is halfway from yellow 100 to grey 130
+    expect(list[1].perPoint).toBeCloseTo(20); // spell 3 at 50% too, tie: same chance
   });
 });

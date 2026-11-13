@@ -21,6 +21,7 @@ function index(data: GameData): Map<string, number> {
 
 /** The item that teaches this recipe, if one exists. */
 export function recipeItemFor(data: GameData, r: Recipe): number | undefined {
+  if (r.teachItem) return r.teachItem;
   const idx = index(data);
   const names = new Set([r.name, data.items.get(r.out)?.name].filter((n): n is string => !!n));
   for (const name of names) {

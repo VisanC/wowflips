@@ -42,4 +42,4 @@ for (const [file, value] of Object.entries(data)) {
   await writeFile(join(OUT_DIR, `${file}.json`), JSON.stringify(value));
 }
 console.log(`wrote ${data.items.length} items, ${data.recipes.length} recipes, ${Object.keys(data.skills).length} professions to ${OUT_DIR}`);
-console.log(`recipes with a learn level: ${data.recipes.filter((r) => r[8] > 0).length} of ${data.recipes.length}`);
+console.log(`recipes with a learn level in the tables: ${data.recipes.filter((r) => r[8] > 0).length}, taught by an item: ${data.recipes.filter((r) => r[9] > 0).length}, of ${data.recipes.length}`);

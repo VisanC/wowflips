@@ -70,6 +70,18 @@ export function transform(t, build) {
 
   const spellNames = new Map(t.SpellName.map((r) => [num(r.ID), r.Name_lang]));
 
+  // Recipe items ("Schematic: Moonsight Rifle") by name and profession, with the skill they need.
+  // Forever's tables give every recipe a learn level of 1, so for item-taught recipes the item's
+  // RequiredSkillRank is the real learn level. Trainer recipes stay unknown here.
+  const RECIPE_ITEM = /^(Schematic|Plans|Pattern|Recipe|Formula|Manual|Design): (.+)$/;
+  const teachByName = new Map();
+  for (const r of t.ItemSparse) {
+    const m = RECIPE_ITEM.exec(r.Display_lang ?? '');
+    if (!m || !num(r.RequiredSkill)) continue;
+    teachByName.set(`${num(r.RequiredSkill)}|${m[2].toLowerCase()}`, [num(r.ID), num(r.RequiredSkillRank)]);
+  }
+  const itemNames = new Map(t.ItemSparse.map((r) => [num(r.ID), r.Display_lang]));
+
   const recipes = [];
   const seen = new Set();
   const usedSkills = new Map();
@@ -82,16 +94,21 @@ export function transform(t, build) {
     if (!out || !reag) continue;
     seen.add(spell);
     usedSkills.set(skill, skillLines.get(skill));
+    const name = spellNames.get(spell) ?? `Spell ${spell}`;
+    const teach =
+      teachByName.get(`${skill}|${name.toLowerCase()}`) ?? teachByName.get(`${skill}|${(itemNames.get(out.item) ?? '').toLowerCase()}`) ?? [0, 0];
     recipes.push([
       spell,
-      spellNames.get(spell) ?? `Spell ${spell}`,
+      name,
       skill,
       num(a.TrivialSkillLineRankLow),
       num(a.TrivialSkillLineRankHigh),
       out.item,
       out.qty,
       reag,
-      num(a.MinSkillLineRank), // skill needed to learn it (0 if the table has no such column)
+      num(a.MinSkillLineRank) > 1 ? num(a.MinSkillLineRank) : 0, // learn level, when the table has a real one
+      teach[0], // item that teaches it (0: none found, most likely a trainer recipe)
+      teach[1], // skill that item needs
     ]);
   }
   recipes.sort((x, y) => x[0] - y[0]);

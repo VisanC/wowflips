@@ -1,5 +1,5 @@
 import { Engine } from '../engine';
-import { planLeveling, skillUpChance, type LevelPlan, type LevelStep } from '../leveling';
+import { learnLevel, planLeveling, skillUpChance, skillUpsAt, type LevelPlan, type LevelStep, type SkillUp } from '../leveling';
 import { recipeItemFor } from '../recipeItems';
 import { engineOptions, knownSpells, type AppState } from '../state';
 import type { Recipe } from '../types';
@@ -36,6 +36,15 @@ export function renderLeveling(state: AppState): HTMLElement {
   const out = h('div');
 
   const isKnown = (r: Recipe) => known.has(r.spell);
+  const schematicPrice = (r: Recipe) => (r.teachItem ? market.ah.get(r.teachItem)?.min : undefined);
+  const inPool = (r: Recipe) => {
+    if (isKnown(r)) return true;
+    const trainer = r.trainerSeen || !recipeItemFor(data, r);
+    if (cfg.pool === 'trainer') return trainer;
+    if (cfg.pool === 'all') return trainer || schematicPrice(r) !== undefined; // item recipes only when the item is on the AH
+    return false;
+  };
+  const learnCost = (r: Recipe) => (isKnown(r) ? 0 : r.trainerSeen ? (r.trainerCost ?? 0) : (schematicPrice(r) ?? 0));
   const netCost = (r: Recipe): number | undefined => {
     const e = engine.evaluate(r);
     if (!e.complete) return undefined;
@@ -45,10 +54,10 @@ export function renderLeveling(state: AppState): HTMLElement {
   };
 
   const draw = () => {
-    const pool = data.recipes.filter(
-      (r) => r.skill === cfg.prof && data.items.has(r.out) && (isKnown(r) || cfg.pool === 'all' || (cfg.pool === 'trainer' && !recipeItemFor(data, r))),
-    );
-    const plan: LevelPlan = planLeveling(pool, cfg.from, cfg.to, netCost);
+    const pool = data.recipes.filter((r) => r.skill === cfg.prof && data.items.has(r.out) && inPool(r));
+    const plan: LevelPlan = planLeveling(pool, cfg.from, cfg.to, netCost, { learnCost });
+    const now: SkillUp[] = skillUpsAt(pool, cfg.from, netCost);
+    const prof = profs.find((x) => x.id === cfg.prof)!.p;
     const profName = data.skills.get(cfg.prof) ?? '';
 
     // materials for the whole plan (direct reagents, expected crafts rounded up per step)
@@ -61,9 +70,12 @@ export function renderLeveling(state: AppState): HTMLElement {
 
     const learnTag = (r: Recipe) => {
       if (isKnown(r)) return null;
+      if (r.trainerSeen) return h('span', { class: 'tag', title: `Your trainer teaches it at ${r.learn}` }, ['trainer ', money(r.trainerCost ?? 0)]);
       const ri = recipeItemFor(data, r);
-      return h('span', { class: 'tag', title: ri ? `Taught by ${data.items.get(ri)?.name}` : 'Not known yet: most likely a trainer teaches it' }, ri ? 'needs recipe item' : 'learn at trainer');
+      if (ri) return h('span', { class: 'tag', title: `Taught by ${data.items.get(ri)?.name}, needs ${learnLevel(r)}` }, ['schematic ', money(schematicPrice(r))]);
+      return h('span', { class: 'tag', title: `Probably a trainer recipe, not seen yet: learn level ≈ ${learnLevel(r)} (its yellow level). Talk to your trainer once with the addon for the real level and cost.` }, `trainer? ≈${learnLevel(r)}`);
     };
+    const colorCell = (color: string, chance: number) => h('span', { class: `skill-${color}` }, `${COLOR_LABEL[color as keyof typeof COLOR_LABEL]} · ${Math.round(chance * 100)}%`);
 
     out.replaceChildren(
       ...nodes(
@@ -75,6 +87,35 @@ export function renderLeveling(state: AppState): HTMLElement {
           plan.steps.length ? (plan.total >= 0 ? ['costing about ', money(plan.total)] : ['making about ', money(-plan.total)]) : '',
           plan.steps.length ? ` (${cfg.resale === 'none' ? 'keeping what you make' : cfg.resale === 'vendor' ? 'after selling what you make to a vendor' : 'after selling what you make on the AH'}).` : '',
         ),
+        cfg.to > prof.m
+          ? notice('warn', `Your ${prof.n} rank stops at ${prof.m}: you need the next rank from a trainer to go past it.`)
+          : null,
+        h('h2', {}, `Everything that gives a point at ${cfg.from} (${now.length})`),
+        table<SkillUp>(
+          now,
+          [
+            {
+              label: 'Craft',
+              value: (u) => u.recipe.name,
+              render: (u) => [itemLink(u.recipe.out, data.items.get(u.recipe.out)?.name, data.items.get(u.recipe.out)?.quality), u.recipe.qty > 1 ? ` ×${u.recipe.qty}` : '', ' ', learnTag(u.recipe)],
+            },
+            { label: 'Color · chance', value: (u) => u.chance, render: (u) => colorCell(u.color, u.chance) },
+            { label: 'Net each', numeric: true, title: 'Cost of one craft minus what the product brings back', value: (u) => u.net, render: (u) => money(u.net) },
+            { label: 'Per point', numeric: true, title: 'Expected net cost per skill point (net each ÷ chance)', value: (u) => u.perPoint, render: (u) => money(u.perPoint) },
+            { label: 'Grey at', numeric: true, value: (u) => u.recipe.grey },
+          ],
+          {
+            sortBy: 3,
+            desc: false,
+            empty: `Nothing in this list gives a point at ${cfg.from}.`,
+            onRow: (u, tr) => {
+              const next = tr.nextElementSibling;
+              if (next?.classList.contains('detail')) return next.remove();
+              tr.after(h('tr', { class: 'detail' }, h('td', { colSpan: 5 }, recipePanel(state, u.recipe))));
+            },
+          },
+        ),
+        h('h2', {}, 'Cheapest path'),
         plan.stuckAt !== undefined
           ? notice(
               'warn',
@@ -94,7 +135,7 @@ export function renderLeveling(state: AppState): HTMLElement {
             { label: 'Color', value: (s) => s.colorAtStart, render: (s) => h('span', { class: `skill-${s.colorAtStart}` }, `${COLOR_LABEL[s.colorAtStart]}${s.colorAtStart !== 'orange' ? ` (${Math.round(skillUpChance(s.recipe, s.from) * 100)}%)` : ''}`) },
             { label: 'Crafts', numeric: true, title: 'Expected number of crafts (yellow and green ones sometimes give no point)', value: (s) => s.crafts, render: (s) => `≈ ${crafts(s.crafts)}` },
             { label: 'Net each', numeric: true, title: 'Cost of one craft (best mix of buying and crafting parts) minus what the product brings back', value: (s) => s.netEach, render: (s) => money(s.netEach) },
-            { label: 'Step total', numeric: true, value: (s) => s.total, render: (s) => money(s.total) },
+            { label: 'Step total', numeric: true, title: 'Expected net cost, plus learning the recipe the first time it is used', value: (s) => s.total, render: (s) => [money(s.total), s.learnCost ? h('span', { class: 'muted small' }, [' incl. learning ', money(s.learnCost)]) : null] },
           ],
           {
             sortBy: 0,
@@ -162,7 +203,7 @@ export function renderLeveling(state: AppState): HTMLElement {
           { title: 'Which recipes the plan may use', onchange: (e: Event) => { cfg.pool = (e.target as HTMLSelectElement).value as Pool; draw(); } },
           h('option', { value: 'known' }, 'Recipes I know'),
           h('option', { value: 'trainer' }, 'Also trainer recipes'),
-          h('option', { value: 'all' }, 'Every recipe'),
+          h('option', { value: 'all' }, 'Also schematics on the AH'),
         ),
         h(
           'select',

@@ -1,6 +1,6 @@
 import { Engine, type CraftEval } from '../engine';
 import { salesCell, soldPerDay } from '../flowView';
-import { learnLevel } from '../leveling';
+import { learnLevel, learnLevelKnown } from '../leveling';
 import { recipeItemFor } from '../recipeItems';
 import { engineOptions, inventory, knownSpells, type AppState } from '../state';
 import { h, itemLink, money, nodes, notice, signedPct, table } from '../ui';
@@ -9,6 +9,7 @@ import { recipePanel } from './crafts';
 interface LearnRow {
   e: CraftEval;
   learn: number;
+  learnKnown: boolean; // false: a trainer recipe not seen yet, `learn` is its yellow level as a guess
   rank?: number; // your skill in that profession
   recipeItem?: number;
   recipePrice?: number; // cheapest listing of the recipe item
@@ -33,24 +34,30 @@ export function renderLearn(state: AppState): HTMLElement {
     .filter((r) => !known.has(r.spell) && data.items.has(r.out))
     .map((r) => {
       const e = engine.evaluate(r, inv);
-      const recipeItem = recipeItemFor(data, r);
+      const recipeItem = r.trainerSeen ? undefined : recipeItemFor(data, r);
       const recipePrice = recipeItem ? market.ah.get(recipeItem)?.min : undefined;
+      const price = r.trainerSeen ? r.trainerCost : recipePrice;
       return {
         e,
         learn: learnLevel(r),
+        learnKnown: learnLevelKnown(r),
         rank: rankBySkill.get(r.skill),
         recipeItem,
         recipePrice,
-        payback: recipePrice !== undefined && e.complete && e.profit > 0 ? Math.ceil(recipePrice / e.profit) : undefined,
+        payback: price !== undefined && e.complete && e.profit > 0 ? Math.ceil(price / e.profit) : undefined,
       };
     });
 
   const filters = { q: '', prof: 'mine', profitable: true, learnable: false, listedOnly: false };
+  const seenTrainers = new Set((char.trainers ?? []).map((t) => t.prof));
+  const missingTrainers = char.profs.map((p) => p.n).filter((n) => [...data.skills.values()].includes(n) && !seenTrainers.has(n));
   const profIds = [...new Set(all.map((x) => x.e.recipe.skill))].sort((a, b) => (data.skills.get(a) ?? '').localeCompare(data.skills.get(b) ?? ''));
   const results = h('div');
 
   const howToLearn = (x: LearnRow) => {
-    if (!x.recipeItem) return h('span', { class: 'muted', title: 'No recipe item with this name, so most likely a trainer teaches it' }, 'trainer');
+    const r = x.e.recipe;
+    if (r.trainerSeen) return ['Trainer ', money(r.trainerCost ?? 0)];
+    if (!x.recipeItem) return h('span', { class: 'muted', title: 'No recipe item teaches it, so most likely a trainer does. Talk to your trainer once with the addon to get its skill level and cost.' }, 'trainer (not seen yet)');
     const it = data.items.get(x.recipeItem);
     return [itemLink(x.recipeItem, it?.name.replace(/^[^:]+: /, ''), it?.quality), ' ', x.recipePrice !== undefined ? money(x.recipePrice) : h('span', { class: 'muted small' }, 'not on AH')];
   };
@@ -78,15 +85,20 @@ export function renderLearn(state: AppState): HTMLElement {
           {
             label: 'Learn at',
             numeric: true,
-            title: 'Skill needed; green when you have it',
+            title: 'Skill needed; green when you have it. "≈" = trainer recipe not seen yet: its yellow level as a guess',
             value: (x) => x.learn,
-            render: (x) => h('span', { class: x.rank !== undefined && x.rank >= x.learn ? 'cheaper' : 'muted' }, String(x.learn)),
+            render: (x) =>
+              h(
+                'span',
+                { class: x.rank !== undefined && x.rank >= x.learn ? 'cheaper' : 'muted', title: x.learnKnown ? '' : 'Not known yet: talk to your trainer once with the addon (0.4.0+) and export' },
+                `${x.learnKnown ? '' : '≈ '}${x.learn}`,
+              ),
           },
           { label: 'Profit/craft', numeric: true, title: 'Best mix of buying and crafting the parts', value: (x) => (x.e.complete ? x.e.profit : -Infinity), render: (x) => (x.e.complete ? money(x.e.profit, { signed: true }) : '—') },
           { label: 'Profit %', numeric: true, value: (x) => (x.e.complete ? x.e.margin : -Infinity), render: (x) => (x.e.complete ? h('span', { class: `pct ${x.e.profit >= 0 ? 'pos' : 'neg'}` }, signedPct(x.e.margin)) : '—') },
           { label: 'Sold/day', numeric: true, value: (x) => soldPerDay(state, x.e.recipe.out) ?? -1, render: (x) => salesCell(state, x.e.recipe.out, x.e.ahQty) },
           { label: 'How to learn', value: (x) => x.recipePrice ?? (x.recipeItem ? Infinity : 0), render: howToLearn },
-          { label: 'Pays back', numeric: true, title: 'Crafts until the recipe item has paid for itself', value: (x) => x.payback ?? Infinity, render: (x) => (x.payback !== undefined ? `${x.payback} crafts` : '—') },
+          { label: 'Pays back', numeric: true, title: 'Crafts until the recipe (item or trainer cost) has paid for itself', value: (x) => x.payback ?? Infinity, render: (x) => (x.payback !== undefined ? `${x.payback} crafts` : '—') },
         ],
         {
           sortBy: 3,
@@ -110,6 +122,9 @@ export function renderLearn(state: AppState): HTMLElement {
       head,
       h('p', { class: 'muted' }, "Recipes you don't know yet, with what they would earn at today's prices. Click one for its full buy-or-craft plan."),
       !state.latest ? notice('warn', 'No AH scan yet, so nothing can be priced.') : null,
+      missingTrainers.length
+        ? notice('info', `Trainer recipes show "≈" levels until the addon has seen your trainer: talk to your ${missingTrainers.join(' and ')} trainer once (addon 0.4.0+), then export.`)
+        : null,
       h(
         'div',
         { class: 'controls' },

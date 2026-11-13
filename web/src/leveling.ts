@@ -10,8 +10,13 @@ import type { Recipe } from './types';
 
 export type Color = 'locked' | 'orange' | 'yellow' | 'green' | 'grey';
 
+/** Skill needed to learn a recipe. When unknown (a trainer recipe not seen yet), its yellow level as a careful guess. */
 export function learnLevel(r: Recipe): number {
-  return r.learn ?? Math.min(r.yellow, r.grey);
+  return r.learn ?? r.yellow;
+}
+
+export function learnLevelKnown(r: Recipe): boolean {
+  return r.learn !== undefined;
 }
 
 export function skillUpChance(r: Recipe, skill: number): number {
@@ -36,6 +41,7 @@ export interface LevelStep {
   netEach: number; // cost of one craft minus what the product brings back
   total: number; // expected net cost of the step
   colorAtStart: Color;
+  learnCost: number; // one-time cost to learn the recipe for this step (0 if known or free)
 }
 
 export interface LevelPlan {
@@ -49,8 +55,15 @@ export interface LevelPlan {
 /**
  * @param netCost  net copper per craft (cost minus resale), or undefined when it can't be priced
  */
-export function planLeveling(recipes: Recipe[], from: number, to: number, netCost: (r: Recipe) => number | undefined): LevelPlan {
+export function planLeveling(
+  recipes: Recipe[],
+  from: number,
+  to: number,
+  netCost: (r: Recipe) => number | undefined,
+  opts: { learnCost?: (r: Recipe) => number } = {},
+): LevelPlan {
   const steps: LevelStep[] = [];
+  const learned = new Set<number>();
   const nets = new Map<number, number | undefined>();
   const net = (r: Recipe) => {
     if (!nets.has(r.spell)) nets.set(r.spell, netCost(r));
@@ -77,7 +90,9 @@ export function planLeveling(recipes: Recipe[], from: number, to: number, netCos
       last.crafts += crafts;
       last.total += best.n * crafts;
     } else {
-      steps.push({ recipe: best.r, from: skill, to: skill + 1, crafts, netEach: best.n, total: best.n * crafts, colorAtStart: colorAt(best.r, skill) });
+      const learnCost = learned.has(best.r.spell) ? 0 : (opts.learnCost?.(best.r) ?? 0);
+      learned.add(best.r.spell);
+      steps.push({ recipe: best.r, from: skill, to: skill + 1, crafts, netEach: best.n, total: best.n * crafts + learnCost, colorAtStart: colorAt(best.r, skill), learnCost });
     }
   }
   return {
@@ -87,4 +102,25 @@ export function planLeveling(recipes: Recipe[], from: number, to: number, netCos
     reached: skill,
     stuckAt: skill < to ? skill : undefined,
   };
+}
+
+export interface SkillUp {
+  recipe: Recipe;
+  chance: number;
+  color: Color;
+  net: number; // net cost of one craft
+  perPoint: number; // expected net cost per skill point (profit per craft when it makes money)
+}
+
+/** Every recipe that can give a point at this skill, cheapest per point first. */
+export function skillUpsAt(recipes: Recipe[], skill: number, netCost: (r: Recipe) => number | undefined): SkillUp[] {
+  const out: SkillUp[] = [];
+  for (const r of recipes) {
+    const chance = skillUpChance(r, skill);
+    if (!chance) continue;
+    const n = netCost(r);
+    if (n === undefined || !Number.isFinite(n)) continue;
+    out.push({ recipe: r, chance, color: colorAt(r, skill), net: n, perPoint: n >= 0 ? n / chance : n });
+  }
+  return out.sort((a, b) => a.perPoint - b.perPoint || b.chance - a.chance);
 }

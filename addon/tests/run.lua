@@ -183,6 +183,28 @@ Auctionator = { API = { v1 = {} }, State = { CurrentRealm = "PvP" }, Database = 
 	["2772"] = { m = 244, h = { [d(30)] = 300 }, l = {}, a = { [d(30)] = 50 } },
 } } }
 
+-- Engineering trainer ------------------------------------------------------------------
+local services = {
+	{ "Engineering", "header" },
+	{ "Mithril Tube", "available", "Engineering", 195, 1500, "|cffffffff|Hitem:10559::::::::|h[Mithril Tube]|h|r" },
+	{ "Unstable Trigger", "unavailable", "Engineering", 200, 1800, "|cffffffff|Hitem:10560::::::::|h[Unstable Trigger]|h|r" },
+	{ "Bronze Tube", "used", "Engineering", 105, 600, "|cffffffff|Hitem:4371::::::::|h[Bronze Tube]|h|r" },
+	{ "Artisan Engineering", "unavailable" },
+}
+local shown = { available = true, unavailable = false, used = false } -- the player hid some
+local function visible()
+	local v = {}
+	for _, sv in ipairs(services) do if sv[2] == "header" or shown[sv[2]] or sv[2] == nil then v[#v + 1] = sv end end
+	return v
+end
+GetNumTrainerServices = function() return #visible() end
+GetTrainerServiceInfo = function(i) local sv = visible()[i] return sv[1], "", sv[2] end
+GetTrainerServiceSkillReq = function(i) local sv = visible()[i] if sv[3] then return sv[3], sv[4], true end end
+GetTrainerServiceCost = function(i) return visible()[i][5] or 0 end
+GetTrainerServiceItemLink = function(i) return visible()[i][6] end
+GetTrainerServiceTypeFilter = function(kind) return shown[kind] end
+SetTrainerServiceTypeFilter = function(kind, on) shown[kind] = on == 1 or on == true end
+
 -- Load the addon like the client does ------------------------------------------------
 local ns = {}
 local function load(file) assert(loadfile(ROOT .. file))("FlipExport", ns) end
@@ -201,6 +223,8 @@ fire("BANKFRAME_OPENED")
 fire("TRADE_SKILL_SHOW")
 fire("MERCHANT_SHOW")
 for k, v in pairs(C_AuctionHouse_extra) do C_AuctionHouse[k] = v end
+fire("TRAINER_SHOW")
+assert(shown.available and not shown.unavailable and not shown.used, "trainer filters were not restored")
 fire("OWNED_AUCTIONS_UPDATED")
 fire("MAIL_SHOW")
 fire("MAIL_INBOX_UPDATE") -- seen twice: must not double count

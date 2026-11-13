@@ -61,6 +61,16 @@ export interface ImportResult {
   atrHistory: number; // days of Auctionator price history stored
 }
 
+/** Newest list per profession wins. */
+function mergeTrainers(prev: Character['trainers'], incoming: ExportPayload['train']): Character['trainers'] {
+  const map = new Map((prev ?? []).map((x) => [x.prof, x]));
+  for (const [prof, t, list] of Array.isArray(incoming) ? incoming : []) {
+    const old = map.get(prof);
+    if (!old || old.t <= t) map.set(prof, { prof, t, list: Array.isArray(list) ? list : [] });
+  }
+  return map.size ? [...map.values()] : undefined;
+}
+
 /** Lua writes an empty list as {} or []: always get an array. */
 const arr = <T>(x: T[] | Record<string, never> | undefined): T[] => (Array.isArray(x) ? x : []);
 
@@ -89,6 +99,7 @@ export async function importPayload(p: ExportPayload): Promise<ImportResult> {
       bank,
       profs: [...profs.values()],
       skills: p.skills?.length ? p.skills : prev?.skills,
+      trainers: mergeTrainers(prev?.trainers, p.train),
     });
 
     for (const [item, unit, seenAt] of p.vend) {

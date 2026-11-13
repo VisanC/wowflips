@@ -495,6 +495,74 @@ local function readAuctionator()
 end
 
 ---------------------------------------------------------------------------
+-- Profession trainers: every recipe they teach, with the skill it needs and
+-- its cost (the game data has no learn level for trainer recipes).
+---------------------------------------------------------------------------
+
+local capturingTrainer = false
+
+local function captureTrainer()
+	if capturingTrainer or not GetNumTrainerServices or not GetTrainerServiceInfo then return end
+	capturingTrainer = true
+	-- show every service (learnable, too high, already known), then put the filters back
+	local types = { "available", "unavailable", "used" }
+	local saved = {}
+	if GetTrainerServiceTypeFilter and SetTrainerServiceTypeFilter then
+		for _, kind in ipairs(types) do
+			local ok, on = pcall(GetTrainerServiceTypeFilter, kind)
+			saved[kind] = ok and on
+			pcall(SetTrainerServiceTypeFilter, kind, 1)
+		end
+	end
+	local byProf = {}
+	for i = 1, GetNumTrainerServices() do
+		local name, _, category = GetTrainerServiceInfo(i)
+		if name and category ~= "header" then
+			local skillName, rank = nil, 0
+			if GetTrainerServiceSkillReq then
+				local ok, sn, r = pcall(GetTrainerServiceSkillReq, i)
+				if ok then skillName, rank = sn, r end
+			end
+			if skillName and skillName ~= "" then
+				local cost = 0
+				if GetTrainerServiceCost then
+					local ok, c = pcall(GetTrainerServiceCost, i)
+					cost = ok and c or 0
+				end
+				local item = 0
+				if GetTrainerServiceItemLink then
+					local ok, link = pcall(GetTrainerServiceItemLink, i)
+					item = ok and idFromLink(link) or 0
+				end
+				byProf[skillName] = byProf[skillName] or {}
+				local list = byProf[skillName]
+				list[#list + 1] = { name, rank or 0, cost or 0, category or "", item }
+			end
+		end
+	end
+	if SetTrainerServiceTypeFilter then
+		for _, kind in ipairs(types) do
+			if saved[kind] ~= nil then pcall(SetTrainerServiceTypeFilter, kind, saved[kind] and 1 or 0) end
+		end
+	end
+	local c = charData()
+	c.trainers = c.trainers or {}
+	local t, n = now(), 0
+	for prof, list in pairs(byProf) do
+		c.trainers[prof] = { t = t, l = list }
+		n = n + #list
+	end
+	if n > 0 then say("remembered %d trainer recipes (skill needed and cost).", n) end
+	capturingTrainer = false
+end
+
+local function exportTrainers()
+	local out = {}
+	for prof, tr in pairs(charData().trainers or {}) do out[#out + 1] = { prof, tr.t, tr.l } end
+	return out
+end
+
+---------------------------------------------------------------------------
 -- Skill levels (gathering professions like Fishing, Herbalism and Skinning
 -- have no recipe window, so their level is read from the skill list)
 ---------------------------------------------------------------------------
@@ -553,6 +621,7 @@ local function buildPayload()
 		skills = readSkills(),
 		vend = vend,
 		ledger = exportLedger(),
+		train = exportTrainers(),
 		atr = readAuctionator(),
 	}
 end
@@ -655,6 +724,7 @@ function handlers.CRAFT_SHOW() C_Timer.After(0.5, captureCraft) end
 function handlers.CRAFT_UPDATE() captureCraft() end
 
 function handlers.MERCHANT_SHOW() C_Timer.After(0.3, captureMerchant) end
+function handlers.TRAINER_SHOW() C_Timer.After(0.5, captureTrainer) end
 function handlers.MERCHANT_UPDATE() captureMerchant() end
 
 frame:SetScript("OnEvent", function(_, event, ...)
@@ -675,6 +745,6 @@ SlashCmdList.FLIPEXPORT = function(msg)
 	elseif cmd == "status" then status()
 	else
 		say("|cffffff00/flip scan|r (AH open), |cffffff00/flip export|r, |cffffff00/flip status|r")
-		say("Open your bank and each profession window once so they're included.")
+		say("Open your bank, each profession window and your profession trainers once so they're included.")
 	end
 end

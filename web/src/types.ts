@@ -18,7 +18,11 @@ export interface Recipe {
   skill: number;
   yellow: number; // skill where it turns yellow
   grey: number; // skill where it turns grey
-  learn?: number; // skill needed to learn it (orange from here to yellow)
+  learn?: number; // skill needed to learn it (orange from here to yellow), undefined when unknown
+  learnBase?: number; // what the game data knows (recipe item's required skill)
+  teachItem?: number; // recipe item that teaches it ("Schematic: …")
+  trainerCost?: number; // copper, when your trainer sells it (seen by the addon)
+  trainerSeen?: boolean; // learn level comes from your trainer's list
   out: number; // crafted item id
   qty: number; // items per craft
   reagents: [item: number, count: number][];
@@ -40,9 +44,13 @@ export interface ExportPayload {
   vend: [item: number, unitCopper: number, seenAt: number][];
   /** Your AH mails, listings and crafts (addon 0.3.0+). Lua writes an empty list as {} or []. */
   ledger?: { m?: LedgerMailRow[]; a?: OwnAuctionRow[]; c?: CraftRow[] };
+  /** Profession trainers' recipe lists: [profession, seenAt, [name, skillNeeded, cost, 'available'|'unavailable'|'used', itemMade]] */
+  train?: [string, number, TrainerService[]][];
   /** Auctionator's price database (addon 0.3.0+). Days count from d0 (unix), today = t. */
   atr?: { d0: number; t: number; i?: AtrRow[]; p?: AtrPost[] };
 }
+
+export type TrainerService = [name: string, rank: number, cost: number, category: string, item: number];
 
 export type MailKind = 'sold' | 'won' | 'expired' | 'cancelled';
 export type LedgerMailRow = [key: string, kind: MailKind, name: string, item: number, count: number, price: number, cut: number, deposit: number, t: number];
@@ -133,6 +141,7 @@ export interface Character {
   bank?: { t: number; i: [number, number][] };
   profs: { n: string; r: number; m: number; t: number; s: number[] }[];
   skills?: [string, number, number][];
+  trainers?: { prof: string; t: number; list: TrainerService[] }[];
 }
 
 export interface VendorPrice {

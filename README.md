@@ -24,8 +24,9 @@ Gathering professions (Mining, Herbalism, Skinning, Fishing) are listed too, as 
 ### Deals, Learn and Leveling
 
 - **Deals**: *vendor flips* (listings cheaper than a vendor pays: buy and vendor them) and listings *under market price* (well below TradeSkillMaster's region price for items that sell at least N a day), with profit after the AH cut. Set your own limits; tick the box to get a browser notification when new deals turn up after an hourly fetch.
+- **Learn levels**: Forever's game tables give every recipe a learn level of 1, so the site takes the real one from the recipe item (a schematic's required skill) or, for trainer recipes, from your trainer's list: talk to each profession trainer once with the addon (0.4.0+) and export. Until then trainer recipes show "≈" with their yellow level as a guess.
 - **Learn**: recipes you don't know yet in your professions, with profit per craft at today's prices, the skill needed, how to learn it (trainer, or the recipe item and its AH price) and how many crafts it takes to pay the recipe back. Click one for its full buy-or-craft plan.
-- **Leveling**: the cheapest way from your skill to a target. For every skill point it picks the recipe with the lowest expected cost per point (orange always gives a point; from yellow to grey the chance falls to zero), counting what the products sell back for (vendor, AH, or nothing). Shows the steps, expected crafts, cost, and the materials for the whole plan.
+- **Leveling**: every recipe that can give a point at your current skill (with its chance and cost per point), and the cheapest way from your skill to a target. For every skill point it picks the recipe with the lowest expected cost per point (orange always gives a point; from yellow to grey the chance falls to zero), counting what the products sell back for (vendor, AH, or nothing). Shows the steps, expected crafts, cost, and the materials for the whole plan.
 
 ### Your sales, and Auctionator
 

@@ -62,6 +62,7 @@ export interface AppState {
 export async function loadState(data: GameData, settings: Settings): Promise<AppState> {
   const chars = await db.characters.orderBy('updatedAt').reverse().toArray();
   const char = chars.find((c) => c.key === settings.charKey) ?? chars[0];
+  applyTrainers(data, char);
   const [latest, previous] = await latestSnapshots(2);
   const learned = await db.vendor.toArray();
   const market: Market = {
@@ -85,6 +86,32 @@ export async function loadState(data: GameData, settings: Settings): Promise<App
     }
   }
   return { data, settings, chars, char, latest, previous, market, flow, tsm };
+}
+
+/**
+ * Learn levels: the game data knows them for recipes taught by an item; for trainer recipes
+ * they come from the trainer lists the addon saw. Recomputed per character.
+ */
+export function applyTrainers(data: GameData, char?: Character) {
+  for (const r of data.recipes) {
+    r.learn = r.learnBase;
+    r.trainerCost = undefined;
+    r.trainerSeen = undefined;
+  }
+  for (const tr of char?.trainers ?? []) {
+    const skill = [...data.skills.entries()].find(([, n]) => n === tr.prof)?.[0];
+    if (skill === undefined) continue;
+    const inSkill = data.recipes.filter((r) => r.skill === skill);
+    const byOut = new Map(inSkill.map((r) => [r.out, r]));
+    const byName = new Map(inSkill.map((r) => [r.name.toLowerCase(), r]));
+    for (const [name, rank, cost, , item] of tr.list) {
+      const r = (item && byOut.get(item)) || byName.get(name.toLowerCase());
+      if (!r) continue;
+      r.learn = rank || r.learn;
+      r.trainerCost = cost;
+      r.trainerSeen = true;
+    }
+  }
 }
 
 export function currentHouse(s: Settings): string | undefined {
