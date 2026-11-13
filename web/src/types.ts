@@ -23,6 +23,11 @@ export interface Recipe {
   teachItem?: number; // recipe item that teaches it ("Schematic: …")
   trainerCost?: number; // copper, when your trainer sells it (seen by the addon)
   trainerSeen?: boolean; // learn level comes from your trainer's list
+  green?: number; // skill where it turns green (when known; else halfway from yellow to grey)
+  /** From Recipe Master: taught by a trainer, sold by a vendor (copper, or another currency). */
+  rm?: { trainer: boolean; vendorCost?: number; vendorPrice?: string; faction?: string; spec?: number };
+  /** Game-data values, kept so Recipe Master's can be taken off again. */
+  base?: { yellow: number; grey: number; teachItem?: number };
   out: number; // crafted item id
   qty: number; // items per craft
   reagents: [item: number, count: number][];

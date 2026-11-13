@@ -14,6 +14,7 @@ class FlipDB extends Dexie {
   crafts!: Table<CraftRecord, string>;
   posts!: Table<PostRecord, string>;
   history!: Table<HistoryRecord, string>;
+  refdata!: Table<{ key: string; value: unknown }, string>;
 
   constructor() {
     super('forever-flips');
@@ -41,6 +42,8 @@ class FlipDB extends Dexie {
       posts: 'id, item, t',
       history: 'id, item, day',
     });
+    // Reference data read from files on your computer (Recipe Master's recipe database).
+    this.version(4).stores({ refdata: 'key' });
   }
 }
 

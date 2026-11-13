@@ -10,7 +10,7 @@ import type { Recipe } from './types';
 
 export type Color = 'locked' | 'orange' | 'yellow' | 'green' | 'grey';
 
-/** Skill needed to learn a recipe. When unknown (a trainer recipe not seen yet), its yellow level as a careful guess. */
+/** Skill needed to learn a recipe. When unknown (no Recipe Master data, no recipe item), its yellow level as a careful guess. */
 export function learnLevel(r: Recipe): number {
   return r.learn ?? r.yellow;
 }
@@ -30,7 +30,7 @@ export function colorAt(r: Recipe, skill: number): Color {
   if (skill < learnLevel(r)) return 'locked';
   if (skill >= r.grey) return 'grey';
   if (skill < r.yellow) return 'orange';
-  return skill < (r.yellow + r.grey) / 2 ? 'yellow' : 'green';
+  return skill < (r.green ?? (r.yellow + r.grey) / 2) ? 'yellow' : 'green';
 }
 
 export interface LevelStep {

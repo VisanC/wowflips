@@ -1,6 +1,7 @@
 import { fetchConfiguredHouse } from '../blizzardSync';
 import { decodeExport } from '../decode';
 import { db, importPayload, listSnapshots } from '../db';
+import { clearRecipeMaster, readRecipeMasterFiles, saveRecipeMaster } from '../recipeMaster';
 import { blizzardReady, type AppState } from '../state';
 import { ago, h, notice, when } from '../ui';
 
@@ -68,6 +69,48 @@ export async function renderImport(state: AppState, refresh: () => Promise<void>
         h('p', { class: 'muted small' }, 'Prices only: bags, bank and professions still come from the in-game export below.'))
     : h('p', { class: 'muted small' }, 'Tip: connect the Blizzard API in Settings to fetch AH prices without logging in.');
 
+  // Recipe Master: the addon's recipe database, read from its folder on this computer.
+  const rmStatus = h('div');
+  const rmInput = h('input', { type: 'file', multiple: true, class: 'rm-input' });
+  rmInput.setAttribute('webkitdirectory', '');
+  rmInput.addEventListener('change', async () => {
+    if (!rmInput.files?.length) return;
+    rmStatus.replaceChildren(notice('info', 'Reading Recipe Master…'));
+    try {
+      const rm = await readRecipeMasterFiles(rmInput.files);
+      await saveRecipeMaster(rm);
+      lastResult = notice('ok', h('strong', {}, `Recipe Master${rm.version ? ` ${rm.version}` : ''}: `), `${rm.recipes.length.toLocaleString()} recipes with learn levels, skill-up levels and prices.`);
+      await refresh();
+    } catch (e) {
+      rmStatus.replaceChildren(notice('error', (e as Error).message));
+    } finally {
+      rmInput.value = '';
+    }
+  });
+  const rm = state.recipeMaster;
+  const rmCard = h(
+    'div',
+    { class: 'card' },
+    rm
+      ? h(
+          'p',
+          {},
+          h('strong', {}, `Loaded Recipe Master${rm.version ? ` ${rm.version}` : ''}`),
+          `: ${rm.recipes.length.toLocaleString()} recipes, ${ago(rm.loadedAt)}. `,
+          h('button', { class: 'link', onclick: async () => { await clearRecipeMaster(); await refresh(); } }, 'remove'),
+        )
+      : null,
+    h(
+      'p',
+      { class: 'muted small' },
+      'Recipe Master (another addon) knows every recipe\'s learn level, skill-up levels and vendor price. Pick its folder once: ',
+      h('code', {}, 'World of Warcraft\\_forever_\\Interface\\AddOns\\RecipeMaster'),
+      '. Your browser reads the files right here and keeps them in this page. If it asks to "upload" them: nothing leaves your computer. Pick it again after the addon updates.',
+    ),
+    h('label', { class: 'field' }, rm ? 'Reload from folder ' : 'Recipe Master folder ', rmInput),
+    rmStatus,
+  );
+
   const snaps = await listSnapshots();
   const history = snaps.length
     ? h(
@@ -120,6 +163,8 @@ export async function renderImport(state: AppState, refresh: () => Promise<void>
     ),
     box,
     h('div', { class: 'row' }, button),
+    h('h2', {}, 'Recipe Master (learn levels)'),
+    rmCard,
     h('h2', {}, 'Imported scans'),
     state.latest ? null : notice('info', 'Each import with a new AH scan is kept, so price history builds up over time.'),
     history,

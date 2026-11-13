@@ -1,10 +1,11 @@
 import { Engine } from '../engine';
+import { canLearn, isTrainerRecipe, knownSpecs, learnCost as cheapestLearn } from '../learnCost';
 import { learnLevel, planLeveling, skillUpChance, skillUpsAt, type LevelPlan, type LevelStep, type SkillUp } from '../leveling';
-import { recipeItemFor } from '../recipeItems';
 import { engineOptions, knownSpells, type AppState } from '../state';
 import type { Recipe } from '../types';
 import { h, itemLink, money, nodes, notice, table } from '../ui';
 import { recipePanel } from './crafts';
+import { costCell, skillLevels } from './learn';
 
 type Pool = 'known' | 'trainer' | 'all';
 type Resale = 'vendor' | 'ah' | 'none';
@@ -36,15 +37,15 @@ export function renderLeveling(state: AppState): HTMLElement {
   const out = h('div');
 
   const isKnown = (r: Recipe) => known.has(r.spell);
-  const schematicPrice = (r: Recipe) => (r.teachItem ? market.ah.get(r.teachItem)?.min : undefined);
+  const specs = knownSpecs(data, known);
   const inPool = (r: Recipe) => {
     if (isKnown(r)) return true;
-    const trainer = r.trainerSeen || !recipeItemFor(data, r);
-    if (cfg.pool === 'trainer') return trainer;
-    if (cfg.pool === 'all') return trainer || schematicPrice(r) !== undefined; // item recipes only when the item is on the AH
-    return false;
+    if (cfg.pool === 'known' || !canLearn(r, char, specs)) return false;
+    if (isTrainerRecipe(data, r)) return true;
+    // vendor recipes and recipe items on the AH: only when there is a gold price
+    return cfg.pool === 'all' && cheapestLearn(data, market, r).cost !== undefined;
   };
-  const learnCost = (r: Recipe) => (isKnown(r) ? 0 : r.trainerSeen ? (r.trainerCost ?? 0) : (schematicPrice(r) ?? 0));
+  const learnCost = (r: Recipe) => (isKnown(r) ? 0 : (cheapestLearn(data, market, r).cost ?? 0));
   const netCost = (r: Recipe): number | undefined => {
     const e = engine.evaluate(r);
     if (!e.complete) return undefined;
@@ -70,10 +71,7 @@ export function renderLeveling(state: AppState): HTMLElement {
 
     const learnTag = (r: Recipe) => {
       if (isKnown(r)) return null;
-      if (r.trainerSeen) return h('span', { class: 'tag', title: `Your trainer teaches it at ${r.learn}` }, ['trainer ', money(r.trainerCost ?? 0)]);
-      const ri = recipeItemFor(data, r);
-      if (ri) return h('span', { class: 'tag', title: `Taught by ${data.items.get(ri)?.name}, needs ${learnLevel(r)}` }, ['schematic ', money(schematicPrice(r))]);
-      return h('span', { class: 'tag', title: `Probably a trainer recipe, not seen yet: learn level ≈ ${learnLevel(r)} (its yellow level). Talk to your trainer once with the addon for the real level and cost.` }, `trainer? ≈${learnLevel(r)}`);
+      return h('span', { class: 'tag', title: `Not known yet: learn at ${learnLevel(r)}` }, `learn ${r.learn === undefined ? '≈' : ''}${learnLevel(r)} · `, costCell(state, cheapestLearn(data, market, r), r));
     };
     const colorCell = (color: string, chance: number) => h('span', { class: `skill-${color}` }, `${COLOR_LABEL[color as keyof typeof COLOR_LABEL]} · ${Math.round(chance * 100)}%`);
 
@@ -102,7 +100,7 @@ export function renderLeveling(state: AppState): HTMLElement {
             { label: 'Color · chance', value: (u) => u.chance, render: (u) => colorCell(u.color, u.chance) },
             { label: 'Net each', numeric: true, title: 'Cost of one craft minus what the product brings back', value: (u) => u.net, render: (u) => money(u.net) },
             { label: 'Per point', numeric: true, title: 'Expected net cost per skill point (net each ÷ chance)', value: (u) => u.perPoint, render: (u) => money(u.perPoint) },
-            { label: 'Grey at', numeric: true, value: (u) => u.recipe.grey },
+            { label: 'Skill-ups', title: 'Orange · yellow · green · grey', value: (u) => u.recipe.grey, render: (u) => skillLevels(u.recipe, learnLevel(u.recipe)) },
           ],
           {
             sortBy: 3,
@@ -203,7 +201,7 @@ export function renderLeveling(state: AppState): HTMLElement {
           { title: 'Which recipes the plan may use', onchange: (e: Event) => { cfg.pool = (e.target as HTMLSelectElement).value as Pool; draw(); } },
           h('option', { value: 'known' }, 'Recipes I know'),
           h('option', { value: 'trainer' }, 'Also trainer recipes'),
-          h('option', { value: 'all' }, 'Also schematics on the AH'),
+          h('option', { value: 'all' }, 'Also vendor and AH recipes'),
         ),
         h(
           'select',

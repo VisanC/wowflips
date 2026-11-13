@@ -2,6 +2,7 @@ import { db, latestSnapshots, loadThroughput, partialSnapshotsSince } from './db
 import { ahMap, vendorPrices, type CraftMode, type EngineOptions, type Market } from './engine';
 import type { GameData } from './gamedata';
 import { emptyFlow, houseKey, type Flow, type Throughput } from './throughput';
+import { loadRecipeMaster, type RmData } from './recipeMaster';
 import { loadTsm, type TsmData, type TsmRow } from './tsm';
 import type { AhRow, Character, Snapshot } from './types';
 import { VENDOR_REAGENTS } from './vendor';
@@ -57,12 +58,15 @@ export interface AppState {
   flow?: Throughput;
   /** TradeSkillMaster's region data (sold per day, sale rate), if the site build fetched it. */
   tsm?: TsmData;
+  /** Recipe Master's recipe database, when loaded from the addon folder (Import page). */
+  recipeMaster?: RmData;
 }
 
 export async function loadState(data: GameData, settings: Settings): Promise<AppState> {
   const chars = await db.characters.orderBy('updatedAt').reverse().toArray();
   const char = chars.find((c) => c.key === settings.charKey) ?? chars[0];
-  applyTrainers(data, char);
+  const recipeMaster = await loadRecipeMaster();
+  applyLearnData(data, char, recipeMaster);
   const [latest, previous] = await latestSnapshots(2);
   const learned = await db.vendor.toArray();
   const market: Market = {
@@ -85,18 +89,25 @@ export async function loadState(data: GameData, settings: Settings): Promise<App
       if (!data.items.has(id)) data.items.set(id, { id, name, quality: 1, sell: 0, buy: 0, vstack: 1, stack: 1, partial: true });
     }
   }
-  return { data, settings, chars, char, latest, previous, market, flow, tsm };
+  return { data, settings, chars, char, latest, previous, market, flow, tsm, recipeMaster };
 }
 
 /**
- * Learn levels: the game data knows them for recipes taught by an item; for trainer recipes
- * they come from the trainer lists the addon saw. Recomputed per character.
+ * Learn levels, skill-up levels and learning costs. In order of trust: Recipe Master's database
+ * (loaded from your addon folder), then the trainer lists the addon saw, then the recipe item's
+ * required skill from the game data. Recomputed on every load.
  */
-export function applyTrainers(data: GameData, char?: Character) {
+export function applyLearnData(data: GameData, char?: Character, rm?: RmData) {
   for (const r of data.recipes) {
+    r.base ??= { yellow: r.yellow, grey: r.grey, teachItem: r.teachItem };
+    r.yellow = r.base.yellow;
+    r.grey = r.base.grey;
+    r.teachItem = r.base.teachItem;
     r.learn = r.learnBase;
+    r.green = undefined;
     r.trainerCost = undefined;
     r.trainerSeen = undefined;
+    r.rm = undefined;
   }
   for (const tr of char?.trainers ?? []) {
     const skill = [...data.skills.entries()].find(([, n]) => n === tr.prof)?.[0];
@@ -111,6 +122,15 @@ export function applyTrainers(data: GameData, char?: Character) {
       r.trainerCost = cost;
       r.trainerSeen = true;
     }
+  }
+  for (const x of rm?.recipes ?? []) {
+    const r = data.recipesBySpell.get(x.spell);
+    if (!r) continue;
+    r.learn = x.learn;
+    if (x.colors && x.colors[3] > 0) [, r.yellow, r.green, r.grey] = x.colors;
+    if (!x.isSpell && x.key !== r.out) r.teachItem = x.key; // filed under its recipe item
+    else if (x.trainer) r.teachItem = undefined;
+    r.rm = { trainer: !!x.trainer, vendorCost: x.vendorCost, vendorPrice: x.vendorPrice, faction: x.faction, spec: x.spec };
   }
 }
 

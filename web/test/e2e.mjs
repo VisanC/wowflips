@@ -1,6 +1,7 @@
 // Browser smoke test: import two pastes, then visit every page.
 // Usage: node test/e2e.mjs <baseUrl> <paste1> <paste2> <screenshotDir>
-import { readFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import puppeteer from 'puppeteer-core';
 
 const [base, paste1, paste2, shots = '/tmp/shots'] = process.argv.slice(2);
@@ -107,6 +108,30 @@ await page.$$eval('main table tbody tr', (r) => r[0]?.click());
 await page.waitForSelector('tr.detail table.plan');
 console.log('learn detail presets:', await text('tr.detail .presets'));
 await page.screenshot({ path: `${shots}/learn.png`, fullPage: true });
+
+// Recipe Master: load the made-up fixture through the folder input, as a folder pick would
+const rmDir = new URL('./fixtures/recipemaster/', import.meta.url).pathname;
+const walk = (d) => readdirSync(d).flatMap((n) => (statSync(join(d, n)).isDirectory() ? walk(join(d, n)) : [join(d, n)]));
+const rmFiles = walk(rmDir).map((p) => ({ path: relative(rmDir, p), text: readFileSync(p, 'utf8') }));
+await go('import');
+await page.$eval('input.rm-input', (el, files) => {
+  const dt = new DataTransfer();
+  for (const f of files) {
+    const file = new File([f.text], f.path.split('/').pop());
+    Object.defineProperty(file, 'webkitRelativePath', { value: f.path });
+    dt.items.add(file);
+  }
+  el.files = dt.files;
+  el.dispatchEvent(new Event('change'));
+}, rmFiles);
+await page.waitForSelector('.notice.ok, .notice.error');
+console.log('recipe master:', await text('.notice.ok, .notice.error'));
+console.log('recipe master card:', (await text('main .card:last-of-type')).replace(/\s+/g, ' ').slice(0, 120));
+await go('learn');
+await page.$$eval('main .controls input[type=checkbox]', (c) => { c[0].click(); });
+console.log('learn rows with Recipe Master:\n  ' + (await rowsOf()).slice(0, 8).join('\n  '));
+console.log('learn notice gone:', !(await page.$('main .notice.info')));
+await page.screenshot({ path: `${shots}/learn-rm.png`, fullPage: true });
 
 await go('leveling');
 console.log('leveling profs:', await page.$$eval('main .controls select', (s) => s[0].innerText.replace(/\s+/g, ' | ')));
