@@ -1,11 +1,14 @@
 import Dexie, { type Table } from 'dexie';
 import type { HouseSnapshot } from './blizzard';
+import { diffStates, KEEP_DAYS, summarize, WINDOW_DAYS, type AuctionState, type SalesRecord, type Throughput } from './throughput';
 import type { Character, ExportPayload, Snapshot, VendorPrice } from './types';
 
 class FlipDB extends Dexie {
   snapshots!: Table<Snapshot, number>;
   characters!: Table<Character, string>;
   vendor!: Table<VendorPrice, number>;
+  auctionState!: Table<AuctionState, string>;
+  sales!: Table<SalesRecord, number>;
 
   constructor() {
     super('forever-flips');
@@ -13,6 +16,13 @@ class FlipDB extends Dexie {
       snapshots: '++id, takenAt, charKey',
       characters: 'key, updatedAt',
       vendor: 'item',
+    });
+    this.version(2).stores({
+      snapshots: '++id, takenAt, charKey',
+      characters: 'key, updatedAt',
+      vendor: 'item',
+      auctionState: 'house',
+      sales: '++id, house, at',
     });
   }
 }
@@ -55,6 +65,7 @@ export async function importPayload(p: ExportPayload): Promise<ImportResult> {
       bags: p.bags,
       bank,
       profs: [...profs.values()],
+      skills: p.skills?.length ? p.skills : prev?.skills,
     });
 
     for (const [item, unit, seenAt] of p.vend) {
@@ -96,6 +107,7 @@ export async function importPayload(p: ExportPayload): Promise<ImportResult> {
 
 /** Saves a scan fetched from Blizzard's API. Returns false if that exact snapshot is already stored. */
 export async function saveApiSnapshot(snap: HouseSnapshot): Promise<boolean> {
+  await recordSales(snap.state);
   const dupe = await db.snapshots.where('takenAt').equals(snap.takenAt).filter((s) => s.source === 'api').first();
   if (dupe) return false;
   await db.snapshots.add({
@@ -108,6 +120,26 @@ export async function saveApiSnapshot(snap: HouseSnapshot): Promise<boolean> {
     rows: snap.rows,
   });
   return true;
+}
+
+/** Compares the new auctions with the house's previous ones and stores what sold. */
+export async function recordSales(state: AuctionState): Promise<SalesRecord | undefined> {
+  return db.transaction('rw', db.auctionState, db.sales, async () => {
+    const prev = await db.auctionState.get(state.house);
+    if (prev && prev.items.at >= state.items.at && prev.commodities.at >= state.commodities.at) return undefined; // nothing newer
+    const rec = prev ? diffStates(prev, state) : undefined;
+    if (rec) await db.sales.add(rec);
+    await db.auctionState.put(state);
+    await db.sales.where('at').below(state.items.at - KEEP_DAYS * 86400).delete();
+    return rec;
+  });
+}
+
+/** Sales rates for one house over the last WINDOW_DAYS. */
+export async function loadThroughput(house: string): Promise<Throughput> {
+  const since = Math.floor(Date.now() / 1000) - WINDOW_DAYS * 86400;
+  const records = await db.sales.where('house').equals(house).filter((r) => r.at >= since).toArray();
+  return summarize(records);
 }
 
 /** Latest scans first, without the (large) row data. */
@@ -144,5 +176,5 @@ export async function importBackup(file: File) {
 }
 
 export async function wipeAll() {
-  await Promise.all([db.snapshots.clear(), db.characters.clear(), db.vendor.clear()]);
+  await Promise.all([db.snapshots.clear(), db.characters.clear(), db.vendor.clear(), db.auctionState.clear(), db.sales.clear()]);
 }

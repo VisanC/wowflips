@@ -204,3 +204,16 @@ describe('strategies', () => {
     expect(list.cashNeeded).toBe(5 * 399 + 1 * 420 + 6 * 410 + 2 * 1888 + 4 * 600);
   });
 });
+
+describe('ties', () => {
+  it('smelts when ore and bar cost the same (prefers the raw material)', () => {
+    const market = { ah: ahMap([[3858, 900, 100, [[900, 100]]], [3860, 900, 100, [[900, 100]]]]), vendor };
+    const best = new Engine(data, market, { ...opts([10097]), strategy: 'best' }).unitCost(3860);
+    expect(best.kind).toBe('craft');
+    expect(best.unit).toBe(900);
+  });
+  it('still buys the bar when it is cheaper by a copper', () => {
+    const market = { ah: ahMap([[3858, 900, 100, [[900, 100]]], [3860, 899, 100, [[899, 100]]]]), vendor };
+    expect(new Engine(data, market, { ...opts([10097]), strategy: 'best' }).unitCost(3860).kind).toBe('ah');
+  });
+});

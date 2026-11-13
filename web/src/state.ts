@@ -1,6 +1,7 @@
-import { db, latestSnapshots } from './db';
+import { db, latestSnapshots, loadThroughput } from './db';
 import { ahMap, vendorPrices, type CraftMode, type EngineOptions, type Market } from './engine';
 import type { GameData } from './gamedata';
+import { emptyFlow, houseKey, type Flow, type Throughput } from './throughput';
 import type { AhRow, Character, Snapshot } from './types';
 import { VENDOR_REAGENTS } from './vendor';
 
@@ -15,10 +16,11 @@ export interface Settings {
   blizzRuleset?: number;
   blizzHouse?: number;
   blizzHouseLabel?: string;
+  autoFetch: boolean; // fetch Blizzard prices every hour while the page is open
 }
 
 const SETTINGS_KEY = 'forever-flips:settings';
-const DEFAULTS: Settings = { cut: 0.05, craftMode: 'known', recipeScope: 'known', blizzRegion: 'eu', blizzId: '', blizzSecret: '' };
+const DEFAULTS: Settings = { cut: 0.05, craftMode: 'known', recipeScope: 'known', blizzRegion: 'eu', blizzId: '', blizzSecret: '', autoFetch: true };
 
 export function loadSettings(): Settings {
   try {
@@ -44,6 +46,8 @@ export interface AppState {
   latest?: Snapshot;
   previous?: Snapshot;
   market: Market;
+  /** Sales rates from hourly Blizzard snapshots (undefined until the API is set up). */
+  flow?: Throughput;
 }
 
 export async function loadState(data: GameData, settings: Settings): Promise<AppState> {
@@ -55,7 +59,25 @@ export async function loadState(data: GameData, settings: Settings): Promise<App
     ah: latest ? ahMap(latest.rows) : new Map<number, AhRow>(),
     vendor: vendorPrices(data, VENDOR_REAGENTS, learned),
   };
-  return { data, settings, chars, char, latest, previous, market };
+  const house = currentHouse(settings);
+  const flow = house ? await loadThroughput(house) : undefined;
+  return { data, settings, chars, char, latest, previous, market, flow };
+}
+
+export function currentHouse(s: Settings): string | undefined {
+  return s.blizzRuleset && s.blizzHouse ? houseKey(s.blizzRegion, s.blizzRuleset, s.blizzHouse) : undefined;
+}
+
+/** Sales rate of one item, or undefined when there is no comparable data yet. */
+export function flowFor(state: AppState, item: number): Flow | undefined {
+  const t = state.flow;
+  if (!t) return undefined;
+  const f = t.flows.get(item);
+  if (f) return f;
+  // Never seen moving: zero sales over the hours we watched its kind of auction.
+  const commodity = (state.data.items.get(item)?.stack ?? 1) > 1;
+  const hours = commodity ? t.hoursCommodities : t.hoursItems;
+  return hours > 0 ? emptyFlow(hours) : undefined;
 }
 
 export function blizzardReady(s: Settings): boolean {

@@ -1,6 +1,7 @@
 import { agreement } from '../aggregate';
 import { connect, type ForeverApi, type HouseSnapshot, type Named } from '../blizzard';
 import { db, exportBackup, importBackup, saveApiSnapshot, wipeAll } from '../db';
+import { hoursText } from '../flowView';
 import { saveSettings, type AppState } from '../state';
 import { ago, h, nodes, notice } from '../ui';
 
@@ -131,6 +132,17 @@ function blizzardSection(state: AppState, refresh: () => Promise<void>): HTMLEle
     ),
     h('div', { class: 'row' }, connectBtn),
     out,
+    h(
+      'label',
+      { class: 'field' },
+      h('input', { type: 'checkbox', checked: settings.autoFetch, onchange: (e: Event) => { settings.autoFetch = (e.target as HTMLInputElement).checked; save(); } }),
+      ' Fetch new prices every hour while this site is open (a background tab is fine). Sales per day come from comparing these hourly snapshots.',
+    ),
+    state.flow
+      ? h('p', { class: 'muted small' }, state.flow.records
+          ? `Sales data: ${state.flow.records} hourly comparisons in the last week (${hoursText(state.flow.hoursCommodities)} of commodities, ${hoursText(state.flow.hoursItems)} of gear and other items).`
+          : 'Sales data: none yet. It starts after two fetches about an hour apart (at most 3 hours apart).')
+      : null,
   );
 }
 

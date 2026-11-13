@@ -270,6 +270,43 @@ local function showExport(text, rawSize)
 	exportFrame.edit:HighlightText()
 end
 
+---------------------------------------------------------------------------
+-- Skill levels (gathering professions like Fishing, Herbalism and Skinning
+-- have no recipe window, so their level is read from the skill list)
+---------------------------------------------------------------------------
+
+local function readSkills()
+	local out = {}
+	if GetNumSkillLines and GetSkillLineInfo then
+		-- collapsed headers hide their lines: expand them first
+		for _ = 1, 10 do
+			local expanded = false
+			for i = 1, GetNumSkillLines() do
+				local _, isHeader, isExpanded = GetSkillLineInfo(i)
+				if isHeader and not isExpanded and ExpandSkillHeader then
+					ExpandSkillHeader(i)
+					expanded = true
+					break
+				end
+			end
+			if not expanded then break end
+		end
+		for i = 1, GetNumSkillLines() do
+			local name, isHeader, _, rank, _, _, max = GetSkillLineInfo(i)
+			if name and not isHeader and max and max > 1 then out[#out + 1] = { name, rank or 0, max } end
+		end
+	elseif GetProfessions and GetProfessionInfo then
+		local list = { GetProfessions() }
+		for k = 1, 6 do
+			if list[k] then
+				local name, _, rank, max = GetProfessionInfo(list[k])
+				if name then out[#out + 1] = { name, rank or 0, max or 0 } end
+			end
+		end
+	end
+	return out
+end
+
 local function buildPayload()
 	local c = charData()
 	local profs = {}
@@ -289,6 +326,7 @@ local function buildPayload()
 		bags = readBags(),
 		bank = c.bank,
 		profs = profs,
+		skills = readSkills(),
 		vend = vend,
 	}
 end

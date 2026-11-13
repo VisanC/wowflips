@@ -10,6 +10,7 @@
 // Credentials are typed into Settings and kept only in this browser's localStorage.
 
 import { aggregate, type Listing } from './aggregate';
+import { houseKey, packAuctions, type AuctionState, type RawAuction } from './throughput';
 import type { AhExportRow } from './types';
 
 const LOCALE = 'en_GB';
@@ -66,16 +67,6 @@ function namedList(data: unknown, preferredKey?: string): Named[] {
     .map((x) => ({ id: x.id as number, name: nameOf(x.name) || `#${x.id}` }));
 }
 
-interface ApiAuction {
-  item?: { id?: number };
-  buyout?: number;
-  quantity?: number;
-}
-interface ApiCommodity {
-  item?: { id?: number };
-  unit_price?: number;
-  quantity?: number;
-}
 
 export class ForeverApi {
   constructor(
@@ -105,9 +96,9 @@ export class ForeverApi {
   /** Downloads one house (items + commodities) and aggregates it into scan rows. */
   async houseSnapshot(ruleset: number, house: number, onProgress?: (msg: string) => void): Promise<HouseSnapshot> {
     onProgress?.('Downloading item auctions…');
-    const items = await this.get<{ name?: unknown; ruleset?: unknown; auctions?: ApiAuction[] }>(`/data/wow/ruleset/${ruleset}/auctions/${house}`);
+    const items = await this.get<{ name?: unknown; ruleset?: unknown; auctions?: RawAuction[] }>(`/data/wow/ruleset/${ruleset}/auctions/${house}`);
     onProgress?.('Downloading commodities (ore, bars, herbs…)…');
-    const commodities = await this.get<{ auctions?: ApiCommodity[] }>(`/data/wow/ruleset/${ruleset}/auctions/${house}/commodities`);
+    const commodities = await this.get<{ auctions?: RawAuction[] }>(`/data/wow/ruleset/${ruleset}/auctions/${house}/commodities`);
 
     const listings: Listing[] = [];
     for (const a of items.data.auctions ?? []) {
@@ -117,27 +108,41 @@ export class ForeverApi {
     for (const c of commodities.data.auctions ?? []) {
       if (c.item?.id && c.unit_price) listings.push({ item: c.item.id, unit: c.unit_price, qty: c.quantity ?? 1 });
     }
-    const modified = [items.lastModified, commodities.lastModified]
-      .map((s) => (s ? Date.parse(s) : NaN))
-      .filter((n) => Number.isFinite(n));
+    const now = Math.floor(Date.now() / 1000);
+    const at = (lm?: string) => {
+      const t = lm ? Date.parse(lm) : NaN;
+      return Number.isFinite(t) ? Math.floor(t / 1000) : now;
+    };
+    const itemsAt = at(items.lastModified);
+    const commoditiesAt = at(commodities.lastModified);
+    const key = houseKey(this.region, ruleset, house);
     return {
-      takenAt: Math.floor((modified.length ? Math.max(...modified) : Date.now()) / 1000),
+      key,
+      takenAt: Math.max(itemsAt, commoditiesAt),
       houseName: nameOf(items.data.name) || `House ${house}`,
       rulesetName: nameOf(items.data.ruleset),
       itemAuctions: items.data.auctions?.length ?? 0,
       commodityAuctions: commodities.data.auctions?.length ?? 0,
       rows: aggregate(listings),
+      state: {
+        house: key,
+        items: packAuctions(items.data.auctions, itemsAt),
+        commodities: packAuctions(commodities.data.auctions, commoditiesAt),
+      },
     };
   }
 }
 
 export interface HouseSnapshot {
+  key: string; // region-ruleset-house
   takenAt: number;
   houseName: string;
   rulesetName: string;
   itemAuctions: number;
   commodityAuctions: number;
   rows: AhExportRow[];
+  /** Every auction, kept to work out what sold by the next fetch. */
+  state: AuctionState;
 }
 
 export async function connect(region: string, clientId: string, secret: string): Promise<ForeverApi> {

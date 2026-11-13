@@ -20,6 +20,7 @@ export interface Recipe {
   out: number; // crafted item id
   qty: number; // items per craft
   reagents: [item: number, count: number][];
+  gather?: boolean; // not a real recipe: a gathered item (ore, herb, fish, leather)
 }
 
 /** The decoded addon export (FLIPX1 string). */
@@ -32,6 +33,8 @@ export interface ExportPayload {
   bags: [number, number][];
   bank?: { t: number; i: [number, number][] };
   profs: { n: string; r: number; m: number; t: number; s: number[] }[];
+  /** Every skill line: [name, rank, max]. Added in addon 0.2.0; older exports lack it. */
+  skills?: [string, number, number][];
   vend: [item: number, unitCopper: number, seenAt: number][];
 }
 
@@ -62,6 +65,7 @@ export interface Character {
   bags: [number, number][];
   bank?: { t: number; i: [number, number][] };
   profs: { n: string; r: number; m: number; t: number; s: number[] }[];
+  skills?: [string, number, number][];
 }
 
 export interface VendorPrice {

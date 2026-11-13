@@ -1,8 +1,10 @@
 import { Engine, STRATEGY_LABEL, type CraftEval, type Part, type Source, type Strategy } from '../engine';
+import { flowCell, flowLine, hoursText, rate } from '../flowView';
+import { BONUS_ITEMS, gathersFor, skillName, skillRank } from '../gather';
 import { buildShoppingList, shoppingListText, type ShoppingList } from '../shopping';
-import { engineOptions, inventory, knownSpells, saveSettings, type AppState } from '../state';
+import { engineOptions, flowFor, inventory, knownSpells, saveSettings, type AppState } from '../state';
 import type { Recipe } from '../types';
-import { ago, h, itemLink, money, moneyText, nodes, notice, pct, table, type Child } from '../ui';
+import { ago, h, itemLink, money, moneyText, nodes, notice, signedPct, table, type Child } from '../ui';
 
 const STRATEGIES: Strategy[] = ['best', 'buy', 'craft'];
 
@@ -58,9 +60,12 @@ export function filterRecipes(state: AppState): Recipe[] {
   });
 }
 
+const pctTag = (e: CraftEval) => h('span', { class: `pct ${e.profit >= 0 ? 'pos' : 'neg'}` }, signedPct(e.margin));
+
+/** Cost of one method with its profit % underneath. */
 const costCell = (e: CraftEval, best?: number) =>
   e.complete
-    ? h('span', { class: best !== undefined && Math.abs(e.cost - best) < 0.5 ? 'cheapest' : '' }, money(e.cost))
+    ? h('span', { class: 'costcell' }, h('span', { class: best !== undefined && Math.abs(e.cost - best) < 0.5 ? 'cheapest' : '' }, money(e.cost)), pctTag(e))
     : h('span', { class: 'muted', title: 'Some reagent has no AH or vendor price' }, '—');
 
 function renderShoppingList(list: ShoppingList, label: string, state: AppState): HTMLElement {
@@ -80,6 +85,15 @@ function renderShoppingList(list: ShoppingList, label: string, state: AppState):
     }
   });
   const product = data.items.get(list.recipe.out);
+  const units = list.crafts * list.recipe.qty;
+  const invested = list.cashNeeded + list.stockValue;
+  const f = flowFor(state, list.recipe.out);
+  const sellTime = !f
+    ? null
+    : f.perDay > 0
+      ? h('p', { class: units > f.perDay ? 'warn-text' : 'muted small' },
+          `At the current rate (${rate(f.perDay)} a day sold, everyone's listings included) selling ${units} takes about ${(units / f.perDay).toFixed(1)} days.`)
+      : h('p', { class: 'warn-text' }, `None sold in the last ${hoursText(f.hours)} of data: these may sit on the AH a long time.`);
 
   return h(
     'div',
@@ -142,10 +156,69 @@ function renderShoppingList(list: ShoppingList, label: string, state: AppState):
         h('div', {}, 'Cash needed ', money(list.cashNeeded)),
         list.stockValue ? h('div', {}, 'Your own items used ', money(list.stockValue)) : null,
         h('div', {}, `Selling ${list.crafts * list.recipe.qty} × ${product?.name ?? ''} `, money(list.revenue)),
-        h('div', {}, h('strong', {}, 'Profit '), money(list.profit, { signed: true })),
+        h('div', {}, h('strong', {}, 'Profit '), money(list.profit, { signed: true }), invested > 0 ? h('span', { class: `pct ${list.profit >= 0 ? 'pos' : 'neg'}` }, ` ${signedPct(list.profit / invested)}`) : null),
       ),
+      sellTime,
       h('div', { class: 'row' }, copyBtn, copyStatus),
     ),
+  );
+}
+
+const gathered = () => h('span', { class: 'muted', title: 'Gathered, not crafted: costs only your time' }, 'gathered');
+
+/** Detail for a gathered item: what it sells for, how fast, what you hold, and whether processing it pays more. */
+function renderGatherDetail(e: CraftEval, state: AppState, engine: Engine, inv: Map<number, number>): HTMLElement {
+  const { data } = state;
+  const item = data.items.get(e.recipe.out);
+  const prof = skillName(data, e.recipe.skill);
+  const rank = skillRank(state.char, prof);
+  const held = inv.get(e.recipe.out) ?? 0;
+  const perUnit = e.revenue;
+  // Known single-reagent recipes that turn it into something else (smelting, cooking…).
+  const known = knownSpells(state.char);
+  const processing = data.recipes
+    .filter((r) => r.reagents.length === 1 && r.reagents[0][0] === e.recipe.out && known.has(r.spell))
+    .map((r) => {
+      const out = engine.evaluate(r, inv);
+      return { r, perInput: out.revenue / r.reagents[0][1] };
+    })
+    .sort((a, b) => b.perInput - a.perInput);
+  const roughSkill = prof === 'Skinning' ? ' (about: it depends on the mob level)' : prof === 'Fishing' ? ' (about: it depends on the zone)' : '';
+
+  return h(
+    'div',
+    { class: 'chain' },
+    h(
+      'div',
+      {},
+      itemLink(e.recipe.out, item?.name, item?.quality),
+      ` is gathered with ${prof}, from skill ${e.recipe.yellow}${roughSkill}`,
+      rank !== undefined ? `; you have ${rank}.` : '. Your skill is unknown: update the addon and export again.',
+    ),
+    BONUS_ITEMS.has(e.recipe.out) ? h('p', { class: 'muted small' }, `You can't gather this on purpose: it comes as a bonus while ${prof === 'Mining' ? 'mining ore veins' : 'picking other herbs'}.`) : null,
+    h('div', {}, 'One sells for ', money(perUnit), ` after the AH cut (lowest on AH `, money(e.ahUnit), `, ${e.ahQty} listed); vendor pays `, money(e.vendorUnit), '.'),
+    flowLine(state, e.recipe.out, e.ahQty),
+    held ? h('p', {}, `You have ${held} in bags & bank, worth about `, money(perUnit * held), '.') : null,
+    processing.length
+      ? h(
+          'ul',
+          { class: 'tree' },
+          processing.map(({ r, perInput }) => {
+            const outItem = data.items.get(r.out);
+            const diff = perInput - perUnit;
+            return h(
+              'li',
+              {},
+              `${r.name}: ${r.reagents[0][1]} → ${r.qty} × `,
+              itemLink(r.out, outItem?.name, outItem?.quality),
+              ', worth ',
+              money(perInput),
+              ' per one gathered ',
+              h('span', { class: `pct ${diff >= 0 ? 'pos' : 'neg'}` }, diff >= 0 ? ['(', money(diff), ' more than selling it raw)'] : ['(', money(-diff), ' less than selling it raw)']),
+            );
+          }),
+        )
+      : null,
   );
 }
 
@@ -177,6 +250,7 @@ function renderDetail(row: Row, state: AppState, engines: Record<Strategy, Engin
     'div',
     { class: 'chain' },
     h('div', {}, h('strong', {}, r.name), ` makes ${r.qty} × `, itemLink(r.out, product?.name, product?.quality), '. Lowest on AH: ', money(row.best.ahUnit), ` (${row.best.ahQty} listed), vendor pays `, money(row.best.vendorUnit), '.'),
+    flowLine(state, r.out, row.best.ahQty),
     h(
       'div',
       { class: 'row' },
@@ -199,7 +273,7 @@ function renderDetail(row: Row, state: AppState, engines: Record<Strategy, Engin
           h('span', { class: 'opt-label' }, STRATEGY_LABEL[strategy]),
           i === 0 ? h('span', { class: 'tag ah' }, 'cheapest') : same ? h('span', { class: 'tag' }, 'same cost') : null,
           h('span', { class: 'opt-cost' }, ev.complete ? ['cost ', money(ev.cost)] : h('span', { class: 'muted' }, 'missing prices')),
-          ev.complete ? h('span', { class: 'opt-profit' }, 'profit ', money(ev.profit, { signed: true }), h('span', { class: 'muted' }, ` (${pct(ev.margin)})`)) : null,
+          ev.complete ? h('span', { class: 'opt-profit' }, 'profit ', money(ev.profit, { signed: true }), ' ', pctTag(ev)) : null,
           i > 0 && ev.complete && !same ? h('span', { class: 'muted small' }, ' +', money(ev.cost - cheapest), ' vs cheapest') : null,
           btn,
         ),
@@ -219,9 +293,14 @@ export function renderCrafts(state: AppState, rerender: () => void): HTMLElement
   const rows: Row[] = filterRecipes(state)
     .filter((r) => data.items.has(r.out))
     .map((r) => ({ best: engines.best.evaluate(r, inv), buy: engines.buy.evaluate(r, inv), craft: engines.craft.evaluate(r, inv) }));
+  // Gathered items (ore, herbs, leather, fish): free to make, so "profit" is what they sell for.
+  for (const g of gathersFor(data, char, settings.recipeScope)) {
+    const e = { ...engines.best.evaluate(g, inv), craftableNow: inv.get(g.out) ?? 0, margin: NaN };
+    rows.push({ best: e, buy: e, craft: e });
+  }
 
   const filters = { q: '', prof: 'all', profitable: false, makeable: false };
-  const profOptions = [...new Set(rows.map((e) => e.best.recipe.skill))].map((s) => [String(s), data.skills.get(s) ?? `Skill ${s}`]);
+  const profOptions = [...new Set(rows.map((e) => e.best.recipe.skill))].map((s) => [String(s), skillName(data, s)]);
 
   const controls = h(
     'div',
@@ -278,13 +357,17 @@ export function renderCrafts(state: AppState, rerender: () => void): HTMLElement
             value: (r) => data.items.get(r.best.recipe.out)?.name ?? '',
             render: (r) => {
               const it = data.items.get(r.best.recipe.out);
-              return [r.best.recipe.qty > 1 ? `${r.best.recipe.qty} × ` : '', itemLink(r.best.recipe.out, it?.name, it?.quality)];
+              return [
+                r.best.recipe.qty > 1 ? `${r.best.recipe.qty} × ` : '',
+                itemLink(r.best.recipe.out, it?.name, it?.quality),
+                r.best.recipe.gather && BONUS_ITEMS.has(r.best.recipe.out) ? h('span', { class: 'muted small', title: 'Only drops as a bonus while gathering something else' }, ' bonus') : null,
+              ];
             },
           },
-          { label: 'Profession', value: (r) => data.skills.get(r.best.recipe.skill) ?? '' },
-          { label: 'Buy all', numeric: true, title: 'Buy every reagent, craft nothing but the item itself', value: (r) => cost(r.buy), render: (r) => costCell(r.buy, cost(r.best)) },
-          { label: 'Craft all', numeric: true, title: 'Craft every reagent you can (with the allowed recipes), buy only the rest', value: (r) => cost(r.craft), render: (r) => costCell(r.craft, cost(r.best)) },
-          { label: 'Best', numeric: true, title: 'Cheapest mix: buy or craft each reagent, whichever costs less', value: (r) => cost(r.best), render: (r) => costCell(r.best) },
+          { label: 'Profession', value: (r) => skillName(data, r.best.recipe.skill) },
+          { label: 'Buy all', numeric: true, title: 'Buy every reagent, craft nothing but the item itself', value: (r) => cost(r.buy), render: (r) => (r.best.recipe.gather ? gathered() : costCell(r.buy, cost(r.best))) },
+          { label: 'Craft all', numeric: true, title: 'Craft every reagent you can (with the allowed recipes), buy only the rest', value: (r) => cost(r.craft), render: (r) => (r.best.recipe.gather ? gathered() : costCell(r.craft, cost(r.best))) },
+          { label: 'Best', numeric: true, title: 'Cheapest mix: buy or craft each reagent, whichever costs less', value: (r) => cost(r.best), render: (r) => (r.best.recipe.gather ? gathered() : costCell(r.best)) },
           {
             label: 'Sells for',
             numeric: true,
@@ -293,18 +376,25 @@ export function renderCrafts(state: AppState, rerender: () => void): HTMLElement
             render: (r) => [money(r.best.revenue), ' ', h('span', { class: `tag ${r.best.channel}` }, r.best.channel === 'ah' ? 'AH' : 'vendor')],
           },
           { label: 'Listed', numeric: true, title: 'How many are on the AH right now', value: (r) => r.best.ahQty },
-          { label: 'Profit', numeric: true, title: 'Using the best mix', value: (r) => (r.best.complete ? r.best.profit : -Infinity), render: (r) => (r.best.complete ? money(r.best.profit, { signed: true }) : '—') },
-          { label: 'Margin', numeric: true, value: (r) => (r.best.complete ? r.best.margin : -Infinity), render: (r) => (r.best.complete ? pct(r.best.margin) : '—') },
-          { label: 'Can make', numeric: true, title: 'From your bags and bank (direct reagents)', value: (r) => r.best.craftableNow },
+          {
+            label: 'Sold/day',
+            numeric: true,
+            title: 'Estimated from the hourly Blizzard snapshots (all sellers). Low numbers mean it sells slowly.',
+            value: (r) => flowFor(state, r.best.recipe.out)?.perDay ?? -1,
+            render: (r) => flowCell(flowFor(state, r.best.recipe.out), r.best.ahQty),
+          },
+          { label: 'Profit', numeric: true, title: 'Per craft using the best mix; for gathered items, what one sells for', value: (r) => (r.best.complete ? r.best.profit : -Infinity), render: (r) => (r.best.complete ? money(r.best.profit, { signed: true }) : '—') },
+          { label: 'Profit %', numeric: true, title: 'Profit as a share of what the best mix costs (none for gathered items: they cost only time)', value: (r) => (r.best.complete && Number.isFinite(r.best.margin) ? r.best.margin : -Infinity), render: (r) => (r.best.recipe.gather ? h('span', { class: 'muted' }, 'free') : r.best.complete ? pctTag(r.best) : '—') },
+          { label: 'Can make', numeric: true, title: 'From your bags and bank (direct reagents); for gathered items, how many you have', value: (r) => r.best.craftableNow },
         ],
         {
-          sortBy: 7,
+          sortBy: 8,
           desc: true,
           empty: char ? 'No recipes match. Try "All recipes in my professions" or clear the filters.' : 'Import an export from the game first.',
           onRow: (row, tr) => {
             const next = tr.nextElementSibling;
             if (next?.classList.contains('detail')) return next.remove();
-            tr.after(h('tr', { class: 'detail' }, h('td', { colSpan: 10 }, renderDetail(row, state, engines, inv))));
+            tr.after(h('tr', { class: 'detail' }, h('td', { colSpan: 11 }, row.best.recipe.gather ? renderGatherDetail(row.best, state, engines.best, inv) : renderDetail(row, state, engines, inv))));
           },
         },
       ),

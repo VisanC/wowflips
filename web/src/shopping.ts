@@ -160,6 +160,6 @@ export function shoppingListText(list: ShoppingList, data: GameData, label: stri
   }
   lines.push('Craft, in this order:');
   for (const s of list.steps) lines.push(`  ${s.crafts} × ${s.recipe.name}${s.recipe.qty > 1 ? ` (makes ${s.makes})` : ''}`);
-  lines.push('', `Cash needed: ~${money(list.cashNeeded)}`, `Expected sale: ~${money(list.revenue)}`, `Profit: ~${money(list.profit)}`);
+  lines.push('', `Cash needed: ~${money(list.cashNeeded)}`, `Expected sale: ~${money(list.revenue)}`, `Profit: ~${money(list.profit)}${list.cashNeeded + list.stockValue > 0 ? ` (${list.profit >= 0 ? '+' : ''}${Math.round((list.profit / (list.cashNeeded + list.stockValue)) * 100)}%)` : ''}`);
   return lines.join('\n');
 }

@@ -1,6 +1,7 @@
 import './style.css';
 import { loadGameData, type GameData } from './gamedata';
 import { fetchConfiguredHouse } from './blizzardSync';
+import { db } from './db';
 import { blizzardReady, loadSettings, loadState, saveSettings, type AppState } from './state';
 import { ago, h, notice } from './ui';
 import { renderChanges } from './views/changes';
@@ -36,19 +37,49 @@ async function refresh() {
 }
 
 let headerMsg = '';
+let newDataWaiting = false;
+
+// Blizzard publishes a new snapshot about once an hour. Auto-fetch checks a little after the
+// next one is due, then every 10 minutes until it appears. Each fetch also records what sold.
+const RETRY_MS = 10 * 60_000;
+const AFTER_UPDATE_MS = 65 * 60_000;
+let nextAuto = 0;
+let fetching = false;
+
+async function runFetch(auto: boolean): Promise<boolean> {
+  if (fetching) return false;
+  fetching = true;
+  try {
+    const { added, snap } = await fetchConfiguredHouse(settings);
+    nextAuto = Math.max(Date.now() + RETRY_MS, snap.takenAt * 1000 + AFTER_UPDATE_MS);
+    headerMsg = added ? `${auto ? 'auto-fetched' : 'new scan'}: ${snap.rows.length.toLocaleString()} items` : auto ? '' : 'no newer data yet';
+    return added;
+  } catch (e) {
+    nextAuto = Date.now() + 3 * RETRY_MS;
+    headerMsg = (e as Error).message;
+    return false;
+  } finally {
+    fetching = false;
+  }
+}
+
+async function autoFetchTick() {
+  if (!state || !settings.autoFetch || !blizzardReady(settings) || fetching || Date.now() < nextAuto) return;
+  const added = await runFetch(true);
+  // Don't re-render the page under the user (open rows, filters); offer a link instead.
+  state = await loadState(data, settings);
+  if (added) newDataWaiting = true;
+  app.querySelector('header')?.replaceWith(header());
+}
 
 function fetchButton(): HTMLElement | null {
   if (!blizzardReady(settings)) return null;
-  const btn = h('button', { class: 'small-btn', title: `Fetch the latest prices for ${settings.blizzHouseLabel ?? 'your auction house'} from Blizzard` }, '↻ Fetch AH');
+  const btn = h('button', { class: 'small-btn', title: `Fetch the latest prices for ${settings.blizzHouseLabel ?? 'your auction house'} from Blizzard` }, fetching ? 'Fetching…' : '↻ Fetch AH');
+  btn.disabled = fetching;
   btn.addEventListener('click', async () => {
     btn.disabled = true;
     btn.textContent = 'Fetching…';
-    try {
-      const { added, snap } = await fetchConfiguredHouse(settings);
-      headerMsg = added ? `new scan: ${snap.rows.length.toLocaleString()} items` : 'no newer data yet';
-    } catch (e) {
-      headerMsg = (e as Error).message;
-    }
+    await runFetch(false);
     await refresh();
   });
   return btn;
@@ -88,11 +119,16 @@ function header(): HTMLElement {
         : h('span', { class: 'muted' }, ' · no AH scan yet'),
       fetchButton(),
       msg ? h('span', { class: 'muted small' }, msg) : null,
+      newDataWaiting ? h('button', { class: 'link small', onclick: () => void render() }, 'show new prices') : null,
     ),
   );
 }
 
+let renderSeq = 0;
+
 async function render() {
+  const seq = ++renderSeq;
+  newDataWaiting = false;
   const r = route();
   let view: HTMLElement;
   switch (r) {
@@ -103,7 +139,8 @@ async function render() {
     case 'settings': view = await renderSettings(state, refresh); break;
     default: view = renderCrafts(state, () => void render());
   }
-  app.replaceChildren(header(), h('main', {}, view));
+  if (seq !== renderSeq) return; // a newer render started while this one was loading
+  app.replaceChildren(header(), h('main', { 'data-route': r }, view));
 }
 
 async function start() {
@@ -116,6 +153,11 @@ async function start() {
   }
   await refresh();
   window.addEventListener('hashchange', () => void render());
+
+  const lastApi = await db.snapshots.orderBy('takenAt').reverse().filter((s) => s.source === 'api').first();
+  nextAuto = lastApi ? lastApi.takenAt * 1000 + AFTER_UPDATE_MS : 0;
+  setTimeout(() => void autoFetchTick(), 5_000);
+  setInterval(() => void autoFetchTick(), 60_000);
 }
 
 void start();

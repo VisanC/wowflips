@@ -16,6 +16,9 @@ import type { GameData } from './gamedata';
 import type { AhRow, Recipe } from './types';
 
 export type CraftMode = 'known' | 'all' | 'none';
+/** Costs this close (in copper) count as equal. */
+const TIE = 0.5;
+
 export type Strategy = 'best' | 'buy' | 'craft';
 
 export const STRATEGY_LABEL: Record<Strategy, string> = {
@@ -111,7 +114,8 @@ export class Engine {
         const unit = cost / r.qty;
         if (!crafted || unit < crafted.unit) crafted = { kind: 'craft', unit, recipe: r, parts };
       }
-      if (crafted && (this.strategy === 'craft' || crafted.unit < bought.unit)) best = crafted;
+      // On a tie (within half a copper) craft from the cheaper raw material, e.g. smelt ore rather than buy bars.
+        if (crafted && (this.strategy === 'craft' || crafted.unit <= bought.unit + TIE)) best = crafted;
     }
 
     // Only memoize results computed outside a crafting chain; inside one,

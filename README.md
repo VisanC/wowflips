@@ -17,7 +17,13 @@ Game data (items, recipes, vendor prices) comes from the WoW Forever client tabl
    - `/flip status` shows what has been captured.
 3. On the site, go to **Import** and paste.
 
-On **Crafts**, every recipe shows three costs: **Buy all** (buy every reagent), **Craft all** (craft every reagent you can, buy the rest) and **Best** (buy or craft each reagent, whichever is cheaper). Click a row to see the three options cheapest first, each with its full reagent tree, and press **Shopping list** on any of them for X crafts: what to buy and where (walking up the AH price levels), what comes from your bags and bank, the craft order, cash needed and expected profit. "Copy as text" puts the list on the clipboard.
+On **Crafts**, every recipe shows three costs, each with its profit % underneath: **Buy all** (buy every reagent), **Craft all** (craft every reagent you can, buy the rest) and **Best** (buy or craft each reagent, whichever is cheaper; on a tie it crafts from the raw material, e.g. smelts ore rather than buying bars). Click a row to see the three options cheapest first, each with its full reagent tree, and press **Shopping list** on any of them for X crafts: what to buy and where (walking up the AH price levels), what comes from your bags and bank, the craft order, cash needed, expected profit and roughly how many days it takes to sell at the current rate. "Copy as text" puts the list on the clipboard.
+
+Gathering professions (Mining, Herbalism, Skinning, Fishing) are listed too, as "gathered" rows: what one ore, herb, leather or fish sells for, how fast it sells, how many you hold, and whether processing it first (smelting, for example) pays more. Gems, stone and some herbs are marked "bonus": they only drop while gathering something else. Fishing, Herbalism and Skinning levels need addon 0.2.0 or newer (download the zip again from the Import page).
+
+### Sales per day
+
+With the Blizzard API set up, the site fetches your auction house every hour while it is open (a background tab is fine; Settings can turn this off) and compares each snapshot with the previous one. Auctions that were partly bought, or vanished while they still had time left and no cheaper one was still listed, count as sold. That gives **Sold/day** in Crafts, a sales line on each item, and a **Sells fastest** list on the Changes page (by gold changing hands per day). The first numbers appear after two fetches about an hour apart; they get reliable after a day or so. For gear (non-stackable items) the numbers can include cancelled auctions.
 
 ## Host it on GitHub Pages (free)
 

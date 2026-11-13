@@ -100,6 +100,25 @@ C_TradeSkillUI = {
 	GetRecipeInfo = function(id) return { learned = id ~= 99999 } end,
 }
 
+-- Skill list (classic style), with a collapsed header ------------------------------
+local skillLines = {
+	{ "Professions", true, true },
+	{ "Engineering", false, false, 177, 0, 0, 225 },
+	{ "Mining", false, false, 177, 0, 0, 225 },
+	{ "Secondary Skills", true, false }, -- collapsed: its lines appear once expanded
+}
+local hidden = {
+	{ "Fishing", false, false, 120, 0, 0, 150 },
+	{ "Cooking", false, false, 95, 0, 0, 150 },
+}
+GetNumSkillLines = function() return #skillLines end
+GetSkillLineInfo = function(i) return unpack(skillLines[i]) end
+ExpandSkillHeader = function(i)
+	skillLines[i][3] = true
+	for k, line in ipairs(hidden) do table.insert(skillLines, i + k, line) end
+	hidden = {}
+end
+
 -- Merchant: retail-style GetMerchantItemInfo (10 returns) ---------------------------
 local merchant = {
 	{ 2880, 100, 1, -1, false },  -- Weak Flux, unlimited

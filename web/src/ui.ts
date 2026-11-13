@@ -73,6 +73,11 @@ export function pct(x: number): string {
   return Number.isFinite(x) ? `${Math.round(x * 100)}%` : '—';
 }
 
+/** "+88%" / "-12%" */
+export function signedPct(x: number): string {
+  return Number.isFinite(x) ? `${x >= 0 ? '+' : ''}${pct(x)}` : '—';
+}
+
 const QUALITY = ['q0', 'q1', 'q2', 'q3', 'q4', 'q5'];
 
 export function itemLink(id: number, name: string | undefined, quality = 1): HTMLElement {

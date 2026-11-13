@@ -19,7 +19,7 @@ page.on('console', (m) => m.type() === 'error' && errors.push(`console: ${m.text
 const text = async (sel) => page.$eval(sel, (el) => el.innerText);
 const go = async (route) => {
   await page.goto(`${base}#/${route}`, { waitUntil: 'networkidle0' });
-  await page.waitForSelector('main h1');
+  await page.waitForSelector(`main[data-route="${route}"] h1`);
 };
 
 async function importPaste(file) {
@@ -39,8 +39,8 @@ await go('crafts');
 await page.waitForSelector('table');
 const craftRows = await page.$$eval('main table tbody tr', (trs) => trs.map((tr) => tr.innerText.replace(/\s+/g, ' ')));
 console.log('crafts rows:\n  ' + craftRows.join('\n  '));
-// expand the top row (sorted by profit)
-await page.click('main table tbody tr');
+// expand the rifle row
+await page.$$eval('main table tbody tr', (r) => r.find((x) => x.innerText.startsWith('Moonsight Rifle')).click());
 await page.waitForSelector('tr.detail');
 console.log('top row chain:', (await text('tr.detail')).replace(/\s+/g, ' ').slice(0, 400));
 await page.screenshot({ path: `${shots}/crafts.png`, fullPage: true });
@@ -65,6 +65,14 @@ await page.select('main .controls select:nth-of-type(3)', 'all');
 await page.waitForSelector('main table');
 console.log('any-recipe mode, top rows:', (await page.$$eval('main table tbody tr', (t) => t.slice(0, 3).map((r) => r.innerText.replace(/\s+/g, ' ')))).join(' | '));
 await page.select('main .controls select:nth-of-type(3)', 'known');
+
+// gathered items appear as rows; their detail compares selling raw with processing
+const gatherRows = await page.$$eval('main table tbody tr', (r) => r.map((x) => x.innerText.replace(/\s+/g, ' ')).filter((t) => t.includes('gathered')));
+console.log('gather rows:\n  ' + gatherRows.join('\n  '));
+await page.$$eval('main table tbody tr', (r) => r.find((x) => x.innerText.startsWith('Mithril Ore')).click());
+await page.waitForSelector('tr.detail .chain');
+console.log('mithril ore detail:', (await text('tr.detail')).replace(/\s+/g, ' '));
+await page.screenshot({ path: `${shots}/crafts-gather.png`, fullPage: true });
 
 await go('inventory');
 console.log('inventory:', (await text('main p')).replace(/\s+/g, ' '));

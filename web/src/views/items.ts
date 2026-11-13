@@ -1,5 +1,6 @@
 import { db } from '../db';
 import { Engine } from '../engine';
+import { flowLine } from '../flowView';
 import { engineOptions, type AppState } from '../state';
 import type { AhExportRow } from '../types';
 import { ago, h, itemLink, money, notice, sparkline, when } from '../ui';
@@ -43,6 +44,7 @@ async function itemDetail(state: AppState, id: number): Promise<HTMLElement> {
     ah?.levels.length
       ? h('p', {}, 'Cheapest listings: ', ah.levels.flatMap(([p, q], i) => [i ? ', ' : '', `${q} at `, money(p)]))
       : null,
+    flowLine(state, id, ah?.qty),
     history.length > 1 ? h('div', {}, sparkline(history.map((x) => x.min), 320, 60)) : null,
     history.length
       ? h(

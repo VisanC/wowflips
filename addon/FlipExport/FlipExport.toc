@@ -1,7 +1,7 @@
 ## Interface: 16001
 ## Title: FlipExport
 ## Notes: Exports AH prices, bags, bank, known recipes and vendor prices as one string for the Forever Flips web app.
-## Version: 0.1.0
+## Version: 0.2.0
 ## SavedVariables: FlipExportDB
 
 Libs\LibStub\LibStub.lua
