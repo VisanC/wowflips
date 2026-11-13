@@ -121,3 +121,23 @@ table.compact th { cursor: default; }
 }
 
 .small-btn { padding: 0.2rem 0.55rem; font-size: 0.85rem; }
+
+.cheapest { font-weight: 600; }
+.cheapest .money .g, .cheapest .money .s, .cheapest .money .c { text-decoration: underline; text-decoration-color: var(--ok); text-underline-offset: 3px; }
+details.option { border: 1px solid var(--line); border-radius: 8px; margin: 0.5rem 0; background: var(--bg); }
+details.option.best { border-color: #5a4c18; }
+details.option > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; padding: 0.5rem 0.75rem; cursor: pointer; list-style: none; }
+details.option > summary::-webkit-details-marker { display: none; }
+details.option > summary::before { content: '▸'; color: var(--muted); }
+details.option[open] > summary::before { content: '▾'; }
+details.option > summary button { margin-left: auto; }
+details.option > .tree { margin: 0 0.75rem 0.75rem 1.25rem; }
+.opt-label { font-weight: 600; min-width: 9.5rem; }
+input.qty { width: 5.5rem; }
+.shopping { margin-top: 0.75rem; }
+.shopping h3 { margin: 0 0 0.5rem; font-size: 1rem; color: var(--accent-2); }
+.shopping table.compact { margin-bottom: 0.5rem; }
+.totals { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; margin: 0.5rem 0; }
+.warn-text { color: var(--warn); font-size: 0.86rem; }
+.nomargin { margin: 0.25rem 0 0; }
+.tag.vendor { color: #9ccc65; border-color: #3e5a26; }

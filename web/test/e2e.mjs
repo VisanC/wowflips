@@ -45,10 +45,25 @@ await page.waitForSelector('tr.detail');
 console.log('top row chain:', (await text('tr.detail')).replace(/\s+/g, ' ').slice(0, 400));
 await page.screenshot({ path: `${shots}/crafts.png`, fullPage: true });
 
-// "every recipe" + buy-only mode changes the numbers
-await page.select('main .controls select:nth-of-type(3)', 'none');
+// the three options, cheapest first, then a shopping list for each at qty 3
+const options = await page.$$eval('tr.detail details.option > summary', (s) => s.map((x) => x.innerText.replace(/\s+/g, ' ')));
+console.log('options (ranked):\n  ' + options.join('\n  '));
+const costs = await page.$$eval('tr.detail details.option .opt-cost', (s) => s.map((x) => x.innerText));
+console.log('option costs:', costs.join(' | '));
+await page.$eval('tr.detail input.qty', (el) => { el.value = '3'; });
+const btnCount = (await page.$$('tr.detail details.option summary button')).length;
+for (let i = 0; i < btnCount; i++) {
+  const btns = await page.$$('tr.detail details.option summary button');
+  await btns[i].click();
+  await page.waitForSelector('tr.detail .shopping');
+  console.log(`shopping list #${i + 1}:`, (await text('tr.detail .shopping')).replace(/\s+/g, ' ').slice(0, 600));
+}
+await page.screenshot({ path: `${shots}/crafts-shopping.png`, fullPage: true });
+
+// "Sub-crafts: any recipe" re-renders without errors
+await page.select('main .controls select:nth-of-type(3)', 'all');
 await page.waitForSelector('main table');
-console.log('buy-everything mode, top rows:', (await page.$$eval('main table tbody tr', (t) => t.slice(0, 3).map((r) => r.innerText.replace(/\s+/g, ' ')))).join(' | '));
+console.log('any-recipe mode, top rows:', (await page.$$eval('main table tbody tr', (t) => t.slice(0, 3).map((r) => r.innerText.replace(/\s+/g, ' ')))).join(' | '));
 await page.select('main .controls select:nth-of-type(3)', 'known');
 
 await go('inventory');

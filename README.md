@@ -17,6 +17,8 @@ Game data (items, recipes, vendor prices) comes from the WoW Forever client tabl
    - `/flip status` shows what has been captured.
 3. On the site, go to **Import** and paste.
 
+On **Crafts**, every recipe shows three costs: **Buy all** (buy every reagent), **Craft all** (craft every reagent you can, buy the rest) and **Best** (buy or craft each reagent, whichever is cheaper). Click a row to see the three options cheapest first, each with its full reagent tree, and press **Shopping list** on any of them for X crafts: what to buy and where (walking up the AH price levels), what comes from your bags and bank, the craft order, cash needed and expected profit. "Copy as text" puts the list on the clipboard.
+
 ## Host it on GitHub Pages (free)
 
 1. Create a **public** repository on GitHub, for example `wow-flips`. (Pages from private repos needs a paid plan.)

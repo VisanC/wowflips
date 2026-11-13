@@ -6,11 +6,23 @@
 //   - crafting it, where each reagent is costed the same way (recursively)
 // Crafting is only considered through recipes allowed by the options
 // (your known recipes by default), and never loops back into itself.
+//
+// Strategies for sub-components (the top recipe itself is always crafted):
+//   best  - cheapest of buying or crafting, decided per item (the default)
+//   buy   - buy every reagent, never craft sub-components
+//   craft - craft every reagent you can, buy only what can't be crafted
 
 import type { GameData } from './gamedata';
 import type { AhRow, Recipe } from './types';
 
 export type CraftMode = 'known' | 'all' | 'none';
+export type Strategy = 'best' | 'buy' | 'craft';
+
+export const STRATEGY_LABEL: Record<Strategy, string> = {
+  best: 'Best mix',
+  buy: 'Buy everything',
+  craft: 'Craft everything',
+};
 
 export interface Market {
   ah: Map<number, AhRow>;
@@ -21,6 +33,7 @@ export interface EngineOptions {
   cut: number; // AH cut, e.g. 0.05
   craftMode: CraftMode; // which recipes may be used for sub-components
   known: Set<number>; // spell ids you know
+  strategy?: Strategy; // default 'best'
 }
 
 export type Source =
@@ -67,24 +80,38 @@ export class Engine {
     return this.opts.known.has(r.spell);
   }
 
-  /** Cheapest way to get one unit of `item`. */
-  unitCost(item: number, path: Set<number> = new Set()): Source {
-    const cached = this.memo.get(item);
-    if (cached) return cached;
+  get strategy(): Strategy {
+    return this.opts.strategy ?? 'best';
+  }
 
+  /** Cheapest way to buy one unit of `item` (AH or vendor), ignoring crafting. */
+  marketSource(item: number): Source {
     let best: Source = NONE;
     const ah = this.market.ah.get(item);
     if (ah && ah.min > 0) best = { kind: 'ah', unit: ah.min };
     const vendor = this.market.vendor.get(item);
     if (vendor !== undefined && vendor < best.unit) best = { kind: 'vendor', unit: vendor };
+    return best;
+  }
 
-    for (const r of this.data.recipesByOutput.get(item) ?? []) {
-      if (!this.recipeAllowed(r) || path.has(r.spell)) continue;
-      const next = new Set(path).add(r.spell);
-      const { cost, parts, complete } = this.reagentCost(r, next);
-      if (!complete) continue;
-      const unit = cost / r.qty;
-      if (unit < best.unit) best = { kind: 'craft', unit, recipe: r, parts };
+  /** How to get one unit of `item` under this engine's strategy. */
+  unitCost(item: number, path: Set<number> = new Set()): Source {
+    const cached = this.memo.get(item);
+    if (cached) return cached;
+
+    const bought = this.marketSource(item);
+    let best: Source = bought;
+    if (this.strategy !== 'buy') {
+      let crafted: Source | undefined;
+      for (const r of this.data.recipesByOutput.get(item) ?? []) {
+        if (!this.recipeAllowed(r) || path.has(r.spell)) continue;
+        const next = new Set(path).add(r.spell);
+        const { cost, parts, complete } = this.reagentCost(r, next);
+        if (!complete) continue;
+        const unit = cost / r.qty;
+        if (!crafted || unit < crafted.unit) crafted = { kind: 'craft', unit, recipe: r, parts };
+      }
+      if (crafted && (this.strategy === 'craft' || crafted.unit < bought.unit)) best = crafted;
     }
 
     // Only memoize results computed outside a crafting chain; inside one,

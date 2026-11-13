@@ -139,3 +139,68 @@ describe('decodeExport', () => {
     await expect(decodeExport('FLIPX1:AAAA')).rejects.toThrow(/damaged/);
   });
 });
+
+import { ahBuyCost, buildShoppingList } from '../src/shopping';
+
+describe('strategies', () => {
+  // Bronze bars are cheaper to smelt (157 each) than to buy (175); tubes are cheaper to buy (399) than to craft (414).
+  const market = {
+    ah: ahMap([
+      [2840, 164, 100, []], [3576, 150, 100, []], [2841, 175, 3451, [[175, 40], [180, 100]]],
+      [4371, 399, 478, [[399, 5], [420, 20], [450, 100]]], [4375, 410, 457, []], [4400, 1888, 24, []],
+      [1705, 600, 216, []], [2592, 138, 4084, []], [4383, 10890, 15, []],
+    ]),
+    vendor,
+  };
+  const known = [2659, 3938, 3942, 3954];
+  const rifle = data.recipesBySpell.get(3954)!;
+  const engine = (strategy: 'best' | 'buy' | 'craft') => new Engine(data, market, { ...opts(known), strategy });
+
+  it('buy everything never crafts sub-components', () => {
+    expect(engine('buy').unitCost(4371)).toEqual({ kind: 'ah', unit: 399 });
+    expect(engine('buy').evaluate(rifle).cost).toBe(3 * 399 + 3 * 410 + 1888 + 2 * 600);
+  });
+
+  it('craft everything crafts even when buying is cheaper', () => {
+    const tube = engine('craft').unitCost(4371);
+    expect(tube.kind).toBe('craft');
+    expect(tube.unit).toBe(157 * 2 + 100); // smelted bronze + vendor flux
+  });
+
+  it('best mix picks per item and is never worse than the other two', () => {
+    const e = engine('best');
+    expect(e.unitCost(4371).kind).toBe('ah'); // 399 < 414
+    expect(e.unitCost(4375).kind).toBe('ah'); // 410 < 2*157+138 = 452
+    const costs = (['best', 'buy', 'craft'] as const).map((s) => engine(s).evaluate(rifle).cost);
+    expect(costs[0]).toBeLessThanOrEqual(costs[1]);
+    expect(costs[0]).toBeLessThanOrEqual(costs[2]);
+  });
+
+  it('prices AH purchases along the listed levels', () => {
+    expect(ahBuyCost(market, 4371, 3)).toEqual({ total: 3 * 399, estimated: false });
+    expect(ahBuyCost(market, 4371, 15)).toEqual({ total: 5 * 399 + 10 * 420, estimated: false });
+    expect(ahBuyCost(market, 4371, 200)).toEqual({ total: 5 * 399 + 20 * 420 + 175 * 450, estimated: true });
+  });
+
+  it('builds a craft-everything shopping list using bags/bank first', () => {
+    const inventory = new Map([[4371, 6], [2840, 10]]); // 6 tubes, 10 copper bars
+    const list = buildShoppingList(data, market, engine('craft'), rifle, 5, { inventory, cut: 0.05 });
+    // 5 rifles need 15 tubes: 6 from bank, craft 9 -> 18 bronze bars; 15 gizmos -> 30 bronze bars.
+    // 48 bronze bars = 24 smelts -> 24 copper (10 from bags, buy 14) + 24 tin.
+    const steps = Object.fromEntries(list.steps.map((s) => [s.recipe.name, s.crafts]));
+    expect(steps).toEqual({ 'Smelt Bronze': 24, 'Bronze Tube': 9, 'Whirring Bronze Gizmo': 15, 'Moonsight Rifle': 5 });
+    expect(list.steps[0].recipe.name).toBe('Smelt Bronze'); // deepest first
+    expect(list.steps.at(-1)!.recipe.name).toBe('Moonsight Rifle');
+    const buy = Object.fromEntries(list.buy.map((b) => [b.item, [b.qty, b.source]]));
+    expect(buy).toEqual({ 2840: [14, 'ah'], 3576: [24, 'ah'], 2880: [9, 'vendor'], 2592: [15, 'ah'], 4400: [5, 'ah'], 1705: [10, 'ah'] });
+    expect(Object.fromEntries(list.fromStock.map((s) => [s.item, s.qty]))).toEqual({ 4371: 6, 2840: 10 });
+    expect(list.revenue).toBeCloseTo(5 * 10890 * 0.95);
+  });
+
+  it('buy-everything list just buys the direct reagents', () => {
+    const list = buildShoppingList(data, market, engine('buy'), rifle, 2, { cut: 0.05 });
+    expect(list.steps.map((s) => s.recipe.name)).toEqual(['Moonsight Rifle']);
+    expect(Object.fromEntries(list.buy.map((b) => [b.item, b.qty]))).toEqual({ 4371: 6, 4375: 6, 4400: 2, 1705: 4 });
+    expect(list.cashNeeded).toBe(5 * 399 + 1 * 420 + 6 * 410 + 2 * 1888 + 4 * 600);
+  });
+});
