@@ -516,7 +516,13 @@ local function captureTrainer()
 	end
 	local byProf = {}
 	for i = 1, GetNumTrainerServices() do
-		local name, _, category = GetTrainerServiceInfo(i)
+		-- clients order the returns differently (Forever: name, subtext, icon, kind…): find the kind by value
+		local info = { GetTrainerServiceInfo(i) }
+		local name, category = info[1], ""
+		for k = 2, #info do
+			local v = info[k]
+			if v == "header" or v == "available" or v == "unavailable" or v == "used" then category = v break end
+		end
 		if name and category ~= "header" then
 			local skillName, rank = nil, 0
 			if GetTrainerServiceSkillReq then
@@ -599,14 +605,15 @@ local function readSkills()
 	return out
 end
 
+-- An error's first line, with where it happened ("FlipExport.lua:123: attempt to…").
+local function errorText(e)
+	return (tostring(e):gsub("^.-([%w_]+%.lua:%d+:)", "%1"))
+end
+
 local function buildPayload()
 	local c = charData()
-	local profs = {}
-	for _, p in pairs(c.profs) do profs[#profs + 1] = p end
-	local vend = {}
-	for id, v in pairs(DB.vendor) do vend[#vend + 1] = { id, v.p, v.t } end
 	local _, classFile = UnitClass("player")
-	return {
+	local payload = {
 		v = 1,
 		t = now(),
 		build = (GetBuildInfo()),
@@ -615,21 +622,41 @@ local function buildPayload()
 			c = classFile, l = UnitLevel("player"), g = GetMoney(),
 		},
 		ah = DB.ah,
-		bags = readBags(),
 		bank = c.bank,
-		profs = profs,
-		skills = readSkills(),
-		vend = vend,
-		ledger = exportLedger(),
-		train = exportTrainers(),
-		atr = readAuctionator(),
 	}
+	-- Each part on its own: one that fails is left out (and named) instead of stopping the export.
+	local failed = {}
+	local function part(key, label, fn)
+		local ok, v = xpcall(fn, errorText)
+		if ok then payload[key] = v else failed[#failed + 1] = ("%s (%s)"):format(label, v) end
+	end
+	part("bags", "bags", readBags)
+	part("profs", "professions", function()
+		local profs = {}
+		for _, p in pairs(c.profs) do profs[#profs + 1] = p end
+		return profs
+	end)
+	part("skills", "skill levels", readSkills)
+	part("vend", "vendor prices", function()
+		local vend = {}
+		for id, v in pairs(DB.vendor) do vend[#vend + 1] = { id, v.p, v.t } end
+		return vend
+	end)
+	part("ledger", "sales ledger", exportLedger)
+	part("train", "trainer lists", exportTrainers)
+	part("atr", "Auctionator prices", readAuctionator)
+	return payload, failed
 end
 
 local function export()
 	if not LibDeflate then return say("LibDeflate failed to load; the addon files may be incomplete.") end
-	local text, rawSize = Core.Encode(buildPayload(), LibDeflate, 3)
-	showExport(text, rawSize)
+	local ok, err = xpcall(function()
+		local payload, failed = buildPayload()
+		local text, rawSize = Core.Encode(payload, LibDeflate, 3)
+		showExport(text, rawSize)
+		for _, f in ipairs(failed) do say("|cffff8040left out|r %s", f) end
+	end, errorText)
+	if not ok then say("|cffff4040export failed:|r %s", err) end
 end
 
 local function status()

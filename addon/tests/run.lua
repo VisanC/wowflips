@@ -238,3 +238,19 @@ log("export (json + deflate + base64): %.2fs CPU", os.clock() - t0)
 assert(exportText, "export window was not filled")
 log("export string: %d KB", math.ceil(#exportText / 1024))
 io.write(exportText)
+
+-- A part that fails is left out and named; the export still opens
+local chat = {}
+local realPrint = print
+print = function(...) chat[#chat + 1] = table.concat({ ... }, " ") end
+local savedAtr = Auctionator
+Auctionator = { Database = setmetatable({}, { __index = function() error("boom") end }) }
+exportText = nil
+SlashCmdList.FLIPEXPORT("export")
+Auctionator = savedAtr
+print = realPrint
+assert(exportText and #exportText > 0, "export did not open when one part failed")
+local named = false
+for _, m in ipairs(chat) do if m:find("left out") and m:find("Auctionator prices") and m:find("boom") then named = true end end
+assert(named, "the failed part was not named in chat: " .. table.concat(chat, " | "))
+log("a failing part is left out and named: ok")
