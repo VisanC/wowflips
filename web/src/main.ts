@@ -159,8 +159,15 @@ function header(): HTMLElement {
       { class: 'status' },
       charSelect,
       state.latest
-        ? h('span', { class: 'muted' }, ` · AH ${state.latest.source === 'api' ? 'from Blizzard' : 'scan'} ${ago(state.latest.takenAt)}`)
-        : h('span', { class: 'muted' }, ' · no AH scan yet'),
+        ? h(
+            'span',
+            { class: 'muted' },
+            ` · AH ${state.latest.source === 'api' ? 'from Blizzard' : 'scan'} ${ago(state.latest.takenAt)}`,
+            state.settings.useTsmHouse && state.tsmHouse && state.tsmHouse.updatedAt > state.latest.takenAt ? `, TSM ${ago(state.tsmHouse.updatedAt)}` : '',
+          )
+        : state.settings.useTsmHouse && state.tsmHouse
+          ? h('span', { class: 'muted' }, ` · AH from TSM ${ago(state.tsmHouse.updatedAt)}`)
+          : h('span', { class: 'muted' }, ' · no AH scan yet'),
       fetchButton(),
       msg ? h('span', { class: 'muted small' }, msg) : null,
       newDataWaiting ? h('button', { class: 'link small', onclick: () => void render() }, 'show new prices') : null,

@@ -40,6 +40,18 @@ Two sources, shown side by side:
 - **TradeSkillMaster** publishes free region data for WoW Forever (sold per day, share of listings that sell, average sale price) as [public CSV files](https://tradeskillmaster.com/public-data). The site downloads the EU and US files every time it builds (every 6 hours), so **Sold/day** in Crafts, the sales line on each item and the **Sells fastest** list on the Changes page work right away. These numbers cover the whole region (all rulesets and both factions) and come from TSM users' sales. Prices from TradeSkillMaster.
 - **Your own auction house**: with the Blizzard API set up, the site fetches your house as soon as Blizzard publishes a new snapshot (about once an hour) while it is open, and compares each snapshot with the previous one. Auctions that were partly bought, or vanished while they still had time left and no cheaper one was still listed, count as sold. These numbers are specific to your ruleset and faction but need a day or so of hourly data, and for gear they can include cancelled auctions.
 
+## Where the numbers come from
+
+Each question has one source that counts; nothing is averaged across sources.
+
+- **What's on the AH now (prices to buy and sell at):** the newest full scan of your auction house: your in-game scan (addon) or a Blizzard API fetch, whichever is newer. Newer partial data then replaces it item by item, oldest first: a few Auctionator searches, and TSM's scan of your auction house (about every 3 hours; uses TSM's "recent" value as the price). The price is the average of the cheapest 3 on sale (Settings).
+- **How much sells:** TSM's region numbers (sold per day, sale rate, average sale price; all rulesets and both factions, daily) and the site's own count from consecutive hourly Blizzard fetches (your auction house only). Both are shown side by side.
+- **What you actually earned:** your AH mail, read by the addon (the Sales tab).
+- **Recipes:** game data from wago.tools; learn levels and skill-up levels from Recipe Master if loaded, else the trainer lists the addon saw, else the recipe item's required skill.
+- **Vendor prices:** game data, plus prices the addon saw at vendors.
+
+The site rebuilds every 30 minutes to pick up new TSM files.
+
 ## Host it on GitHub Pages (free)
 
 1. Create a **public** repository on GitHub, for example `wow-flips`. (Pages from private repos needs a paid plan.)

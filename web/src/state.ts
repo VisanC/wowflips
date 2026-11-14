@@ -3,7 +3,7 @@ import { ahMap, ahRow, vendorPrices, type CraftMode, type EngineOptions, type Ma
 import type { GameData } from './gamedata';
 import { emptyFlow, houseKey, type Flow, type Throughput } from './throughput';
 import { loadRecipeMaster, type RmData } from './recipeMaster';
-import { loadTsm, type TsmData, type TsmRow } from './tsm';
+import { loadTsm, loadTsmHouse, tsmHouseSlug, type TsmData, type TsmHouse, type TsmRow } from './tsm';
 import type { AhRow, Character, Snapshot } from './types';
 import { VENDOR_REAGENTS } from './vendor';
 
@@ -26,10 +26,11 @@ export interface Settings {
   dealAlerts: boolean; // browser notification when new deals appear after an auto-fetch
   dealStackOnly: boolean; // Deals: only stackable goods (TSM's gear prices mix every version of an item)
   priceDepth: number; // AH price = average of the cheapest this many on sale (1 = lowest listing)
+  useTsmHouse: boolean; // use TSM's scan of your auction house when it is newer than yours
 }
 
 const SETTINGS_KEY = 'forever-flips:settings';
-const DEFAULTS: Settings = { cut: 0.05, craftMode: 'known', recipeScope: 'known', blizzRegion: 'eu', blizzId: '', blizzSecret: '', autoFetch: true, hideGathered: false, dealMaxPct: 0.7, dealMinSold: 1, dealMinProfit: 1000, dealAlerts: false, dealStackOnly: false, priceDepth: 3 };
+const DEFAULTS: Settings = { cut: 0.05, craftMode: 'known', recipeScope: 'known', blizzRegion: 'eu', blizzId: '', blizzSecret: '', autoFetch: true, hideGathered: false, dealMaxPct: 0.7, dealMinSold: 1, dealMinProfit: 1000, dealAlerts: false, dealStackOnly: false, priceDepth: 3, useTsmHouse: true };
 
 export function loadSettings(): Settings {
   try {
@@ -64,6 +65,24 @@ export interface AppState {
   tsm?: TsmData;
   /** Recipe Master's recipe database, when loaded from the addon folder (Import page). */
   recipeMaster?: RmData;
+  /** TSM's scan of your auction house (ruleset and faction), about every 3 hours. */
+  tsmHouse?: TsmHouse;
+}
+
+/**
+ * TSM's scan of your auction house as prices: its lowest buyout, and as the price its "recent"
+ * value (worked out from the cheapest auctions with outliers left out), unless Settings asks for
+ * the lowest listing. TSM gives no quantities, so the older scan's quantity is kept.
+ */
+export function applyTsmHouse(market: Market, house: TsmHouse, depth: number) {
+  for (const [id, t] of house.items) {
+    if (t.minBuyout <= 0) continue;
+    const q = market.ah.get(id)?.qty || 1;
+    const row = ahRow(t.minBuyout, q, [[t.minBuyout, q]], 1);
+    if (depth > 1 && t.recent > 0) row.price = t.recent;
+    row.tsmAt = house.updatedAt;
+    market.ah.set(id, row);
+  }
 }
 
 export async function loadState(data: GameData, settings: Settings): Promise<AppState> {
@@ -77,24 +96,36 @@ export async function loadState(data: GameData, settings: Settings): Promise<App
     ah: latest ? ahMap(latest.rows, settings.priceDepth) : new Map<number, AhRow>(),
     vendor: vendorPrices(data, VENDOR_REAGENTS, learned),
   };
-  // Newer partial prices (a few Auctionator searches) replace the full scan's price for those items.
-  for (const p of await partialSnapshotsSince(latest?.takenAt ?? 0)) {
-    for (const [id, min, qty, levels] of p.rows) {
-      const base = market.ah.get(id);
-      const q = qty || base?.qty || 0;
-      market.ah.set(id, ahRow(min, q, levels.length ? levels : [[min, q]], settings.priceDepth));
-    }
+  // Newer than the latest full scan, applied oldest first: partial scans (a few Auctionator
+  // searches) and TSM's scan of your auction house replace the full scan's price for their items.
+  const region = settings.blizzRegion || 'eu';
+  const houseSlug = tsmHouseSlug(char?.realm, char?.faction, settings.blizzRuleset);
+  const tsmHouse = houseSlug ? await loadTsmHouse(region, houseSlug) : undefined;
+  const since = latest?.takenAt ?? 0;
+  const overlays: { t: number; apply: () => void }[] = (await partialSnapshotsSince(since)).map((p) => ({
+    t: p.takenAt,
+    apply: () => {
+      for (const [id, min, qty, levels] of p.rows) {
+        const base = market.ah.get(id);
+        const q = qty || base?.qty || 0;
+        market.ah.set(id, ahRow(min, q, levels.length ? levels : [[min, q]], settings.priceDepth));
+      }
+    },
+  }));
+  if (tsmHouse && settings.useTsmHouse && tsmHouse.updatedAt > since) {
+    overlays.push({ t: tsmHouse.updatedAt, apply: () => applyTsmHouse(market, tsmHouse, settings.priceDepth) });
   }
+  for (const o of overlays.sort((a, b) => a.t - b.t)) o.apply();
   const house = currentHouse(settings);
   const flow = house ? await loadThroughput(house) : undefined;
-  const tsm = await loadTsm(settings.blizzRegion || 'eu');
+  const tsm = await loadTsm(region);
   // Items the game data lacks (some Forever items aren't in wago's tables): at least show their name.
   if (tsm) {
     for (const [id, name] of tsm.names) {
       if (!data.items.has(id)) data.items.set(id, { id, name, quality: 1, sell: 0, buy: 0, vstack: 1, stack: 1, partial: true });
     }
   }
-  return { data, settings, chars, char, latest, previous, market, flow, tsm, recipeMaster };
+  return { data, settings, chars, char, latest, previous, market, flow, tsm, tsmHouse, recipeMaster };
 }
 
 /**

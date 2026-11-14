@@ -206,3 +206,5 @@ table.plan tfoot td { font-weight: 600; border-top: 1px solid var(--line); }
 .kpi { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 0.5rem 0.9rem; min-width: 9.5rem; }
 .kpi .v { font-size: 1.2rem; font-weight: 600; }
 .kpi .l { color: var(--muted); font-size: 0.8rem; }
+.trend-up { color: var(--ok); font-weight: 600; }
+.trend-down { color: var(--bad); font-weight: 600; }

@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   schedule:
-    - cron: '23 * * * *' # hourly: TSM's daily region file (shows up within the hour), new WoW Forever builds from wago.tools
+    - cron: '8,38 * * * *' # every 30 min: TSM's auction house files (TSM updates them about every 3 hours), its daily region file, new WoW Forever builds from wago.tools
   workflow_dispatch:
 
 permissions:

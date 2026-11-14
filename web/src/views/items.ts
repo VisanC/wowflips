@@ -44,11 +44,15 @@ async function itemDetail(state: AppState, id: number): Promise<HTMLElement> {
     h(
       'p',
       {},
-      'Lowest on AH: ', money(ah?.min), ah ? ` (${ah.qty} listed)` : '', ah && ah.price !== ah.min ? [', price used ', money(ah.price), ` (average of the cheapest ${state.settings.priceDepth})`] : '', '. Vendor pays ', money(item?.sell), '. ',
+      'Lowest on AH: ', money(ah?.min),
+      ah?.tsmAt ? ` (TSM's scan ${ago(ah.tsmAt)})` : ah ? ` (${ah.qty} listed)` : '',
+      ah && ah.price !== ah.min ? [', price used ', money(ah.price), ah.tsmAt ? " (TSM's recent value)" : ` (average of the cheapest ${state.settings.priceDepth})`] : '',
+      '. Vendor pays ', money(item?.sell), '. ',
       cost.kind === 'craft' ? ['Cheapest to make yourself: ', money(cost.unit), ` via ${cost.recipe.name}.`] : null,
       cost.kind === 'vendor' ? ['Vendors sell it for ', money(cost.unit), '.'] : null,
     ),
-    ah?.levels.length
+    tsmHouseLine(state, id),
+    ah?.levels.length && !ah.tsmAt
       ? h('p', {}, 'Cheapest listings: ', ah.levels.flatMap(([p, q], i) => [i ? ', ' : '', `${q} at `, money(p)]))
       : null,
     flowLine(state, id, ah?.qty),
@@ -106,5 +110,26 @@ export function renderItems(state: AppState): HTMLElement {
     input,
     results,
     detail,
+  );
+}
+
+/** TSM's view of your auction house: recent value, two-week market value, 60-day price, and the trend between them. */
+function tsmHouseLine(state: AppState, id: number): HTMLElement | null {
+  const t = state.tsmHouse?.items.get(id);
+  if (!t || !state.tsmHouse) return null;
+  const trend = t.marketValue > 0 && t.historical > 0 ? t.marketValue / t.historical - 1 : undefined;
+  return h(
+    'p',
+    { class: 'muted' },
+    `TSM, your auction house (${state.tsmHouse.house}, scanned ${ago(state.tsmHouse.updatedAt)}): recent `,
+    money(t.recent),
+    ', market value ',
+    money(t.marketValue),
+    ', 60-day ',
+    money(t.historical),
+    trend !== undefined && Math.abs(trend) >= 0.01
+      ? h('span', { class: trend > 0 ? 'trend-up' : 'trend-down', title: 'Market value (about two weeks) against the 60-day price' }, ` ${trend > 0 ? '▲' : '▼'} ${Math.round(Math.abs(trend) * 100)}%`)
+      : '',
+    '.',
   );
 }

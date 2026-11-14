@@ -161,4 +161,6 @@ export interface AhRow {
   levels: [number, number][]; // cheapest price levels [unit price, quantity]
   /** What one costs to buy or sells for: the average of the cheapest few on sale (Settings), so one bait listing can't set it. */
   price: number;
+  /** Set when the price comes from TSM's scan of your auction house (newer than your own scan). */
+  tsmAt?: number;
 }

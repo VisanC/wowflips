@@ -142,8 +142,21 @@ function blizzardSection(state: AppState, refresh: () => Promise<void>): HTMLEle
       'p',
       { class: 'muted small' },
       state.tsm
-        ? `TradeSkillMaster sales data (${state.tsm.region.toUpperCase()}): ${state.tsm.items.size.toLocaleString()} items, from TSM's scan ${ago(state.tsm.updatedAt || state.tsm.fetchedAt)}. TSM publishes region data once a day; the site checks for a new file every hour.`
+        ? `TradeSkillMaster sales data (${state.tsm.region.toUpperCase()}): ${state.tsm.items.size.toLocaleString()} items, from TSM's scan ${ago(state.tsm.updatedAt || state.tsm.fetchedAt)}. TSM publishes region data once a day.`
         : 'TradeSkillMaster sales data: not available for this region in the current site build.',
+    ),
+    h(
+      'label',
+      { class: 'field' },
+      h('input', { type: 'checkbox', checked: settings.useTsmHouse, onchange: async (e: Event) => { settings.useTsmHouse = (e.target as HTMLInputElement).checked; save(); await refresh(); } }),
+      " Use TSM's scan of my auction house for prices when it is newer than my own scan",
+    ),
+    h(
+      'p',
+      { class: 'muted small' },
+      state.tsmHouse
+        ? `TSM, your auction house (${state.tsmHouse.region.toUpperCase()} ${state.tsmHouse.house}): ${state.tsmHouse.items.size.toLocaleString()} items, scanned ${ago(state.tsmHouse.updatedAt || state.tsmHouse.fetchedAt)}. TSM scans about every 3 hours; the site checks every 30 minutes.`
+        : 'TSM, your auction house: not known yet. Import your character from the game (its realm and faction pick the auction house).',
     ),
     state.flow
       ? h('p', { class: 'muted small' }, state.flow.records
