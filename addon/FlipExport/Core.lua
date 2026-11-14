@@ -46,8 +46,10 @@ local function encode(v, buf)
 	elseif tv == "number" then
 		if v ~= v or v == math.huge or v == -math.huge then
 			buf[#buf + 1] = "null"
+		elseif v % 1 == 0 and v > -2^31 and v < 2^31 then
+			buf[#buf + 1] = format("%d", v) -- the game's %d stops at 32-bit integers
 		elseif v % 1 == 0 and v > -2^53 and v < 2^53 then
-			buf[#buf + 1] = format("%d", v)
+			buf[#buf + 1] = format("%.0f", v) -- e.g. a 9,999,999 gold listing: 99999990100 copper
 		else
 			buf[#buf + 1] = format("%.14g", v)
 		end

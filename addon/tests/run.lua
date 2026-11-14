@@ -42,6 +42,19 @@ end
 UIParent, ChatFontNormal, UISpecialFrames = mock("UIParent"), mock("Font"), {}
 tinsert = table.insert
 SlashCmdList = {}
+-- Like the game: string.format's %d only takes 32-bit integers
+do
+	local realFormat = string.format
+	string.format = function(fmt, ...)
+		if type(fmt) == "string" and fmt:find("%%d") then
+			for k = 1, select("#", ...) do
+				local v = select(k, ...)
+				if type(v) == "number" and (v >= 2^31 or v < -2^31) then error("integer overflow attempting to store " .. realFormat("%.0f", v), 2) end
+			end
+		end
+		return realFormat(fmt, ...)
+	end
+end
 print = function(...) local t = {} for i = 1, select("#", ...) do t[#t + 1] = tostring(select(i, ...)) end log("[chat] %s", table.concat(t, " ")) end
 
 local function fire(event, ...)
@@ -171,7 +184,7 @@ local atrToday = math.floor((os.time() - os.time({ year = 2020, month = 1, day =
 local d = function(n) return tostring(atrToday - n) end
 AUCTIONATOR_PRICE_DATABASE = { __dbversion = 8 }
 AUCTIONATOR_POSTING_HISTORY = {
-	["4371"] = { { price = 509, quantity = 14, time = os.time() - 3600 } },
+	["4371"] = { { price = 509, quantity = 14, time = os.time() - 3600 }, { price = 99999990100, quantity = 1, time = os.time() - 60 } },
 	["1210"] = { { price = 270, quantity = 1, time = os.time() - 7200 }, { price = 300, quantity = 1, time = os.time() - 100 * 86400 } },
 }
 Auctionator = { API = { v1 = {} }, State = { CurrentRealm = "PvP" }, Database = { db = {
