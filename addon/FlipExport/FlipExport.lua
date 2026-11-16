@@ -90,6 +90,9 @@ end
 -- Professions: known recipe spell IDs per profession
 ---------------------------------------------------------------------------
 
+-- The open profession window and its recipes, for "Craft next" (open the right one first).
+local tradeOpen, openRecipes = false, {}
+
 local function storeProfession(name, rank, max, spells)
 	if not name or name == "" or name == "UNKNOWN" or #spells == 0 then return end
 	charData().profs[name] = { n = name, r = rank or 0, m = max or 0, t = now(), s = spells }
@@ -111,9 +114,10 @@ local function captureTradeSkill()
 			name, rank, max = n, r, m
 		end
 		local spells = {}
+		wipe(openRecipes)
 		for _, id in ipairs(ids) do
 			local info = C_TradeSkillUI.GetRecipeInfo(id)
-			if info and info.learned then spells[#spells + 1] = id end
+			if info and info.learned then spells[#spells + 1] = id openRecipes[id] = true end
 		end
 		storeProfession(name, rank, max, spells)
 		return
@@ -130,6 +134,8 @@ local function captureTradeSkill()
 				if spellID then spells[#spells + 1] = spellID end
 			end
 		end
+		wipe(openRecipes)
+		for _, id in ipairs(spells) do openRecipes[id] = true end
 		storeProfession(name, rank, max, spells)
 	end
 end
@@ -146,6 +152,8 @@ local function captureCraft() -- classic Enchanting window
 			if spellID then spells[#spells + 1] = spellID end
 		end
 	end
+	wipe(openRecipes)
+	for _, id in ipairs(spells) do openRecipes[id] = true end
 	storeProfession(name, rank, max, spells)
 end
 
@@ -182,7 +190,7 @@ end
 ---------------------------------------------------------------------------
 
 local function finishScan(agg, total)
-	DB.ah = { t = now(), n = total, i = agg:Result(3) }
+	DB.ah = { t = now(), n = total, i = agg:Result(3), kind = "full" }
 	say("scanned %d auctions, %d different items.", total, #DB.ah.i)
 	if ns.App then ns.App.DataChanged() end
 end
@@ -212,12 +220,12 @@ local function startScan()
 	end
 	local wait = SCAN_COOLDOWN - (now() - (DB.lastScanRequest or 0))
 	if wait > 0 then
-		say("Blizzard allows one full scan per 15 min. Trying anyway; if nothing happens, retry in %d min.", math.ceil(wait / 60))
+		say("Blizzard allows one full scan per 15 min. Trying anyway; if nothing happens, retry in %d min (or use the normal scan: /flip scan).", math.ceil(wait / 60))
 	end
 	DB.lastScanRequest = now()
 	scanPending = true
 	C_AuctionHouse.ReplicateItems()
-	say("scanning the Auction House... keep it open for a few seconds.")
+	say("full scan of the Auction House... keep it open for a few seconds.")
 end
 
 ---------------------------------------------------------------------------
@@ -709,8 +717,15 @@ ns.GetDB = function() return DB end
 ns.CharData = charData
 ns.ReadSkills = readSkills
 ns.AuctionatorDB = auctionatorDB
-ns.StartScan = function() startScan() end
+ns.Now = now
+--- The AH scan: the browse scan (no 15-minute limit) when the client has it, else the full scan.
+ns.StartScan = function()
+	if ns.Scan and C_AuctionHouse and C_AuctionHouse.SendBrowseQuery then ns.Scan.Summary() else startScan() end
+end
+ns.StartFullScan = function() startScan() end
 ns.IsAuctionHouseOpen = function() return ahOpen end
+--- Whether the open profession window has this recipe (so it can be crafted now).
+ns.ProfessionOpenFor = function(spell) return tradeOpen and openRecipes[spell] == true end
 --- Crafts `count` of a recipe through the open profession window (the click that calls this is
 --- the hardware event crafting needs). Returns true, or false and why not.
 ns.CraftRecipe = function(spell, count)
@@ -813,6 +828,8 @@ function handlers.ADDON_LOADED(name)
 	charKey = (UnitName("player") or "?") .. "-" .. (GetRealmName() or "?")
 	local cutoff = now() - 8 * 86400
 	for k, t in pairs(DB.atrSeen or {}) do if t < cutoff then DB.atrSeen[k] = nil end end
+	local oldListings = now() - 3 * 86400
+	for id, e in pairs(DB.detail or {}) do if type(e) ~= "table" or (e.t or 0) < oldListings then DB.detail[id] = nil end end
 	if ns.App then
 		local ok, err = pcall(ns.App.Init, DB)
 		if not ok then say("|cffff4040window failed to start:|r %s", tostring(err)) end
@@ -864,11 +881,16 @@ function handlers.BANKFRAME_OPENED() captureBank() end
 function handlers.PLAYERBANKSLOTS_CHANGED() if BankFrame and BankFrame:IsShown() then captureBank() end end
 function handlers.BANKFRAME_CLOSED() end
 
-function handlers.TRADE_SKILL_SHOW() C_Timer.After(0.5, captureTradeSkill) end
-function handlers.TRADE_SKILL_LIST_UPDATE() captureTradeSkill() end
-function handlers.TRADE_SKILL_DATA_SOURCE_CHANGED() C_Timer.After(0.5, captureTradeSkill) end
-function handlers.CRAFT_SHOW() C_Timer.After(0.5, captureCraft) end
-function handlers.CRAFT_UPDATE() captureCraft() end
+local function professionChanged() if ns.App and ns.App.CraftButtonChanged then ns.App.CraftButtonChanged() end end
+local function captureThen(fn) return function() fn() professionChanged() end end
+function handlers.TRADE_SKILL_SHOW() tradeOpen = true wipe(openRecipes) C_Timer.After(0.5, captureThen(captureTradeSkill)) end
+function handlers.TRADE_SKILL_LIST_UPDATE() captureTradeSkill() professionChanged() end
+function handlers.TRADE_SKILL_DATA_SOURCE_CHANGED() C_Timer.After(0.5, captureThen(captureTradeSkill)) end
+function handlers.TRADE_SKILL_CLOSE() tradeOpen = false wipe(openRecipes) professionChanged() end
+function handlers.CRAFT_SHOW() tradeOpen = true wipe(openRecipes) C_Timer.After(0.5, captureThen(captureCraft)) end
+function handlers.CRAFT_UPDATE() captureCraft() professionChanged() end
+function handlers.CRAFT_CLOSE() tradeOpen = false wipe(openRecipes) professionChanged() end
+function handlers.BAG_UPDATE_DELAYED() professionChanged() end
 
 function handlers.MERCHANT_SHOW() C_Timer.After(0.3, captureMerchant) end
 function handlers.TRAINER_SHOW() C_Timer.After(0.5, captureTrainer) end
@@ -887,7 +909,8 @@ SLASH_FLIPEXPORT1 = "/flip"
 SLASH_FLIPEXPORT2 = "/flipexport"
 SlashCmdList.FLIPEXPORT = function(msg)
 	local cmd = (msg or ""):lower():match("^%s*(%S*)")
-	if cmd == "scan" then startScan()
+	if cmd == "scan" then ns.StartScan()
+	elseif cmd == "fullscan" then startScan()
 	elseif cmd == "export" then export()
 	elseif cmd == "status" then status()
 	elseif cmd == "" and ns.App then ns.App.Toggle()
@@ -896,7 +919,7 @@ SlashCmdList.FLIPEXPORT = function(msg)
 		DB.ui.quietTsm = DB.ui.quietTsm == false
 		say(DB.ui.quietTsm and "TSM stays out of sight (its windows, tooltips and minimap icon off). Applies from the next /reload." or "TSM is left as it is from now on. Turn its windows and tooltips back on in TSM's own settings (/tsm).")
 	else
-		say("|cffffff00/flip|r opens Forever Flips; |cffffff00/flip scan|r (AH open), |cffffff00/flip export|r (for the website), |cffffff00/flip status|r")
+		say("|cffffff00/flip|r opens Forever Flips; |cffffff00/flip scan|r (AH open; no limit), |cffffff00/flip fullscan|r (price levels of everything; once per 15 min), |cffffff00/flip export|r (for the website), |cffffff00/flip status|r")
 		say("Open your bank, each profession window and your profession trainers once so they're included.")
 	end
 end

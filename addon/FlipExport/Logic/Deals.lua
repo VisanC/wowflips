@@ -3,8 +3,9 @@
 --  - Under market: listings well below the item's usual price, for items that sell. The usual
 --    price is TSM's region average sale price (or market value) when TSM is installed, else the
 --    median of Auctionator's daily lows over two weeks.
--- Only the cheapest few price levels are known per item, so unit counts are "at least";
--- `more` marks items where cheap listings may go on past them.
+-- Unit counts are what is known to be at the good price: every listing once the item's
+-- listings were checked (a search per item, `checked`), else the cheapest few price levels of a
+-- full scan, or just the cheapest listing. `more` marks counts that may go on past that.
 
 local _, ns = ...
 local Deals = {}
@@ -12,7 +13,14 @@ ns.Deals = Deals
 
 local function levelsOf(ah)
 	if ah.levels and #ah.levels > 0 then return ah.levels end
-	return { { ah.min, ah.qty } }
+	return { { ah.min, 1 } }
+end
+
+--- Whether cheap units may go on past the known levels.
+local function more(ah, levels, allBelow, units)
+	if not allBelow or ah.complete then return false end
+	if not (ah.partial or #levels >= 3) then return false end
+	return (ah.qty or 0) == 0 or ah.qty > units
 end
 
 function Deals.VendorFlips(d, market)
@@ -28,7 +36,7 @@ function Deals.VendorFlips(d, market)
 				units = units + lv[2]
 				profit = profit + (vendor - lv[1]) * lv[2]
 			end
-			out[#out + 1] = { item = item, price = ah.min, vendor = vendor, units = units, profit = profit, more = #levels >= 3 and allBelow and ah.qty > units, src = ah.src }
+			out[#out + 1] = { item = item, price = ah.min, vendor = vendor, units = units, profit = profit, more = more(ah, levels, allBelow, units), src = ah.src, checked = ah.src == "listings" or ah.complete == true, t = ah.t }
 		end
 	end
 	table.sort(out, function(a, b) return a.profit > b.profit end)
@@ -64,7 +72,7 @@ function Deals.UnderMarket(d, market, opts)
 						out[#out + 1] = {
 							item = item, price = ah.min, reference = reference, refSrc = refSrc, pct = ah.min / reference,
 							profitEach = net - ah.min, units = units, profit = profit, soldPerDay = soldPerDay, saleRate = saleRate,
-							more = #levels >= 3 and allBelow and ah.qty > units, src = ah.src,
+							more = more(ah, levels, allBelow, units), src = ah.src, checked = ah.src == "listings" or ah.complete == true, t = ah.t,
 						}
 					end
 				end

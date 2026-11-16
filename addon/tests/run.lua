@@ -41,6 +41,7 @@ function CreateFrame(kind, name)
 end
 UIParent, ChatFontNormal, UISpecialFrames = mock("UIParent"), mock("Font"), {}
 tinsert = table.insert
+wipe = function(t) for k in pairs(t) do t[k] = nil end return t end
 SlashCmdList = {}
 -- Like the game: string.format's %d only takes 32-bit integers
 do

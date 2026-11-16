@@ -243,4 +243,31 @@ test("queue: parts first, leftovers, shopping cost along the listings", function
 	eq(x.total, 2 * 10 + 3 * 20 + 2 * 100 + 30)
 end)
 
+test("normal scan, listing checks and Auctionator: newest wins, unit counts", function()
+	-- the normal (browse) scan knows only the cheapest price: 1 unit for sure, maybe more
+	local scan = { t = 1000, kind = "summary", i = { { 3860, 300, 12, {} }, { 2592, 5, 30, {} } } }
+	local m = Prices.Build(d, { scan = scan, depth = 3, useTsm = false })
+	eq(m.ah[3860].partial, true, "partial")
+	eq(m.ah[3860].price, 300, "price = cheapest when levels are unknown")
+	local flips = Deals.VendorFlips(d, m)
+	eq(flips[1].item, 3860) eq(flips[1].units, 1) eq(flips[1].more, true, "maybe more") eq(flips[1].checked, false)
+	-- a listing check after it: every level
+	local detail = { [3860] = { t = 1100, levels = { { 300, 2 }, { 350, 3 }, { 450, 7 } }, qty = 12, complete = true }, [2592] = { t = 1100, levels = {}, qty = 0, complete = true } }
+	m = Prices.Build(d, { scan = scan, detail = detail, depth = 3, useTsm = false })
+	eq(m.ah[3860].src, "listings") eq(m.ah[3860].price, 317, "average of the cheapest 3: (2 x 300 + 350) / 3")
+	eq(m:Ah(2592), nil, "listed none: gone")
+	flips = Deals.VendorFlips(d, m)
+	eq(#flips, 1) eq(flips[1].units, 5) eq(flips[1].more, false) eq(flips[1].checked, true)
+	eq(flips[1].profit, 100 * 2 + 50 * 3)
+	-- an older check loses to a newer scan
+	detail[3860].t = 900
+	m = Prices.Build(d, { scan = scan, detail = detail, depth = 3, useTsm = false })
+	eq(m.ah[3860].src, "scan")
+	-- a scan row that kept a complete check's levels counts as checked
+	scan.i[1] = { 3860, 300, 12, { { 300, 2 }, { 350, 3 }, { 450, 7 } }, true }
+	m = Prices.Build(d, { scan = scan, depth = 3, useTsm = false })
+	flips = Deals.VendorFlips(d, m)
+	eq(flips[1].checked, true) eq(flips[1].units, 5)
+end)
+
 print(("logic tests: %d passed"):format(passed))

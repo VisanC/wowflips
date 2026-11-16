@@ -1,7 +1,8 @@
 -- FlipExport / Logic/Prices.lua
--- What's on the AH now, per item, newest source first:
---   1. the addon's own full scan (/flip scan): cheapest price levels, price = average of the
---      cheapest few units so one bait listing can't set it;
+-- What's on the AH now, per item; the newest source wins:
+--   1. the addon's own scans: the normal (browse) scan has each item's cheapest price and amount;
+--      the full scan (/flip fullscan) and listing checks (a search per item) have the price
+--      levels, so price = average of the cheapest few units and one bait listing can't set it;
 --   2. Auctionator's price database (its scans and every search you make), when it saw the
 --      item on a later day than the scan;
 --   3. TradeSkillMaster, through its addon API, for items neither has (when TSM is installed).
@@ -104,11 +105,14 @@ end
 local Market = {}
 Market.__index = Market
 
---- AH row for an item: { min, qty, levels, price, src = "scan"|"auctionator"|"tsm", t }, or nil.
+--- AH row for an item: { min, qty, levels, price, src = "scan"|"listings"|"auctionator"|"tsm", t,
+--- partial = only the cheapest price is known (levels = { { min, 1 } }), complete = every listing seen }, or nil.
 --- TSM's price wins when the TSM app downloaded it after the scan or Auctionator saw the item
 --- (or when neither has it).
 function Market:Ah(id)
 	local row = self.ah[id]
+	local gone = self.gone[id]
+	if gone and not row and (not self.tsmTime or self.tsmTime <= gone) then return nil end
 	if self.useTsm and (not row or (self.tsmTime and self.tsmTime > (row.t or 0))) then
 		local cached = self.tsmRows[id]
 		if cached == nil then
@@ -119,7 +123,7 @@ function Market:Ah(id)
 				local qty = row and row.qty or 0
 				-- with "lowest listing" (depth 1) the price is TSM's lowest buyout
 				if self.depth <= 1 and min and min > 0 then price = min end
-				cached = { min = min or price, qty = qty, levels = { { min or price, qty } }, price = price, src = "tsm", t = self.tsmTime }
+				cached = { min = min or price, qty = qty, levels = { { min or price, 1 } }, price = price, src = "tsm", t = self.tsmTime, partial = true }
 			else
 				cached = false
 			end
@@ -131,19 +135,22 @@ function Market:Ah(id)
 end
 
 --- @param d     game data (Data.Build)
---- @param opts  { scan = DB.ah, atr = Auctionator's price table, atrSeen = { [key] = time Auctionator recorded it }, depth = 3, learnedVendor = DB.vendor, useTsm = true, tsmTime = when the TSM app downloaded realm prices }
+--- @param opts  { scan = DB.ah, detail = DB.detail (listing checks), atr = Auctionator's price table, atrSeen = { [key] = time Auctionator recorded it }, depth = 3, learnedVendor = DB.vendor, useTsm = true, tsmTime = when the TSM app downloaded realm prices }
 function Prices.Build(d, opts)
 	opts = opts or {}
 	local depth = opts.depth or 3
-	local m = setmetatable({ ah = {}, vendor = {}, tsmRows = {}, useTsm = opts.useTsm ~= false and Prices.TsmAvailable(), tsmTime = opts.tsmTime, scanTime = 0, depth = depth }, Market)
+	local m = setmetatable({ ah = {}, gone = {}, vendor = {}, tsmRows = {}, useTsm = opts.useTsm ~= false and Prices.TsmAvailable(), tsmTime = opts.tsmTime, scanTime = 0, depth = depth }, Market)
 	local scan = opts.scan
 	if type(scan) == "table" and type(scan.i) == "table" then
 		m.scanTime = scan.t or 0
 		for _, r in ipairs(scan.i) do
 			local id, min, qty, levels = r[1], r[2], r[3], r[4] or {}
 			if id and min and min > 0 then
-				if #levels == 0 then levels = { { min, qty or 0 } } end
-				m.ah[id] = { min = min, qty = qty or 0, levels = levels, price = Prices.AhPrice(min, levels, depth), src = "scan", t = m.scanTime }
+				-- the normal scan has no levels: only the cheapest price is known for sure
+				local partial = #levels == 0
+				if partial then levels = { { min, 1 } } end
+				-- r[5]: the levels are every listing (kept from a listing check while unchanged)
+				m.ah[id] = { min = min, qty = qty or 0, levels = levels, price = Prices.AhPrice(min, levels, depth), src = "scan", t = m.scanTime, partial = partial, complete = r[5] == true or nil }
 			end
 		end
 	end
@@ -169,8 +176,21 @@ function Prices.Build(d, opts)
 			if not have or b.t > (have.t or 0) then
 				local e = b.e
 				local qty = (b.lastKey and type(e.a) == "table" and e.a[b.lastKey]) or (have and have.qty) or 0
-				m.ah[id] = { min = e.m, qty = qty, levels = { { e.m, qty } }, price = e.m, src = "auctionator", t = b.t }
+				m.ah[id] = { min = e.m, qty = qty, levels = { { e.m, 1 } }, price = e.m, src = "auctionator", t = b.t, partial = true }
 				m.atrCount = m.atrCount + 1
+			end
+		end
+	end
+	-- listing checks: every price level of an item, when newer than what the rest say
+	for id, e in pairs(opts.detail or {}) do
+		local have = m.ah[id]
+		if type(id) == "number" and type(e) == "table" and type(e.levels) == "table" and (not have or (e.t or 0) >= (have.t or 0)) then
+			if #e.levels == 0 then
+				m.ah[id] = nil -- none listed now
+				m.gone[id] = e.t or 0
+			else
+				local min = e.levels[1][1]
+				m.ah[id] = { min = min, qty = e.qty or 0, levels = e.levels, price = Prices.AhPrice(min, e.levels, depth), src = "listings", t = e.t, complete = e.complete }
 			end
 		end
 	end

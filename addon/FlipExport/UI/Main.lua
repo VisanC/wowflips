@@ -8,7 +8,7 @@ local W = ns.Widgets
 local Data, Prices, Engine, Leveling, Deals, Sales = ns.Data, ns.Prices, ns.Engine, ns.Leveling, ns.Deals, ns.Sales
 local C = W.COLOR
 
-local App = { tabs = {}, overrides = {} }
+local App = { tabs = {}, overrides = {}, statusHooks = {} }
 ns.App = App
 
 local DEFAULTS = {
@@ -48,21 +48,29 @@ function App.Compute()
 	if ns.WatchAuctionator then ns.WatchAuctionator() end
 	local atr = ns.AuctionatorDB()
 	local tsmTime = ns.TsmDataTime and ns.TsmDataTime("AUCTIONDB_NON_COMMODITY_DATA")
-	local market = Prices.Build(d, { scan = DB.ah, atr = atr, atrSeen = DB.atrSeen, depth = ui.priceDepth, learnedVendor = DB.vendor, useTsm = ui.useTsm, tsmTime = tsmTime })
+	local market = Prices.Build(d, { scan = DB.ah, detail = DB.detail, atr = atr, atrSeen = DB.atrSeen, depth = ui.priceDepth, learnedVendor = DB.vendor, useTsm = ui.useTsm, tsmTime = tsmTime })
 	local profs = Data.Professions(d, char)
 	local profSkills = {}
 	for _, p in pairs(profs) do profSkills[p.skill] = true end
 	local known = Data.KnownSpells(char)
+	App.state = {
+		d = d, char = char, profs = profs, profSkills = profSkills, known = known, market = market, atr = atr,
+		tsmTime = tsmTime, faction = UnitFactionGroup and UnitFactionGroup("player") or nil,
+		specs = Leveling.KnownSpecs(d, known),
+	}
+	App.RefreshBags()
+	return App.state
+end
+
+--- Re-reads the bags (and the bank as last seen): cheap, for the craft button between refreshes.
+function App.RefreshBags()
+	local s = App.state
+	if not s then return end
 	local inv, bags = {}, {}
 	for _, e in ipairs(ns.ReadBagCounts and ns.ReadBagCounts() or {}) do bags[e[1]] = (bags[e[1]] or 0) + (e[2] or 0) end
 	for k, v in pairs(bags) do inv[k] = v end
-	for _, e in ipairs((char.bank and char.bank.i) or {}) do inv[e[1]] = (inv[e[1]] or 0) + (e[2] or 0) end
-	App.state = {
-		d = d, char = char, profs = profs, profSkills = profSkills, known = known, market = market, atr = atr,
-		inventory = inv, bags = bags, tsmTime = tsmTime, faction = UnitFactionGroup and UnitFactionGroup("player") or nil,
-		specs = Leveling.KnownSpecs(d, known),
-	}
-	return App.state
+	for _, e in ipairs((s.char.bank and s.char.bank.i) or {}) do inv[e[1]] = (inv[e[1]] or 0) + (e[2] or 0) end
+	s.bags, s.inventory = bags, inv
 end
 
 function App.Engine(craftMode, strategy, overrides)
@@ -102,11 +110,15 @@ local function createWindow()
 	f:EnableMouse(true)
 	f:SetMovable(true)
 	f:RegisterForDrag("LeftButton")
-	f:SetScript("OnDragStart", f.StartMoving)
+	f:SetScript("OnDragStart", function(self)
+		App.HideCraftButton()
+		self:StartMoving()
+	end)
 	f:SetScript("OnDragStop", function(self)
 		self:StopMovingOrSizing()
 		local point, _, rel, x, y = self:GetPoint()
 		App.ui.pos = { point, rel, x, y }
+		App.PlaceCraftButton()
 	end)
 	if f.SetBackdrop then
 		f:SetBackdrop({
@@ -145,9 +157,13 @@ local function createWindow()
 	if f.status.SetWordWrap then f.status:SetWordWrap(false) end
 	local refresh = W.Button(f, "Refresh", 80, function() App.Refresh() end)
 	refresh:SetPoint("BOTTOMRIGHT", -14, 10)
-	local scan = W.Button(f, "Scan AH", 80, function() ns.StartScan() end)
+	local scan = W.Button(f, "Scan AH", 80, function()
+		if ns.Scan and ns.Scan.busy then ns.Scan.Stop()
+		elseif IsShiftKeyDown and IsShiftKeyDown() then ns.StartFullScan()
+		else ns.StartScan() end
+	end)
 	scan:SetPoint("RIGHT", refresh, "LEFT", -6, 0)
-	scan:SetScript("OnEnter", function(self) W.ShowTextTooltip(self, "Full AH scan", "With the Auction House open. Blizzard allows one every 15 minutes; Auctionator's own scans and searches count too.") end)
+	scan:SetScript("OnEnter", function(self) W.ShowTextTooltip(self, "Scan the AH", "With the Auction House open: every item's cheapest price and how many are up, as often as you like (about a minute).", "Shift-click: full scan, with the price levels of everything; Blizzard allows one every 15 minutes.", "Click while scanning: stop.") end)
 	scan:SetScript("OnLeave", W.HideTooltip)
 	f.scanButton = scan
 
@@ -166,6 +182,7 @@ local function createWindow()
 		tab.key = key
 	end
 	f:SetScript("OnShow", function() App.Refresh() end)
+	f:SetScript("OnHide", function() App.HideCraftButton() end)
 	f:Hide() -- new frames start out shown; Toggle shows it, which refreshes
 	return f
 end
@@ -174,8 +191,11 @@ function App.UpdateStatus()
 	if not frame then return end
 	local DB, s = ns.GetDB(), App.state
 	local parts = {}
-	if DB.ah and DB.ah.t then
-		parts[#parts + 1] = ("AH scan %s (%d items)"):format(W.Ago(DB.ah.t), #(DB.ah.i or {}))
+	local busy = ns.Scan and ns.Scan.busy
+	if busy then
+		parts[#parts + 1] = C.accent .. (ns.Scan.progress ~= "" and ns.Scan.progress or "scanning") .. "|r"
+	elseif DB.ah and DB.ah.t then
+		parts[#parts + 1] = ("AH %s %s (%d items)"):format(DB.ah.kind == "full" and "full scan" or "scan", W.Ago(DB.ah.t), #(DB.ah.i or {}))
 	else
 		parts[#parts + 1] = C.muted .. "no AH scan yet|r"
 	end
@@ -183,7 +203,9 @@ function App.UpdateStatus()
 	parts[#parts + 1] = Prices.TsmAvailable() and (App.ui.useTsm and ("TSM " .. (s and s.tsmTime and W.Ago(s.tsmTime) or "on")) or "TSM: off") or (C.muted .. "TSM: not installed|r")
 	parts[#parts + 1] = ns.RecipeMasterData and ("learn levels: Recipe Master " .. (ns.RecipeMasterData.version or "")) or (C.muted .. "learn levels: estimates|r")
 	frame.status:SetText(table.concat(parts, "  ·  "))
-	frame.scanButton:SetEnabled(ns.IsAuctionHouseOpen())
+	frame.scanButton:SetText(busy == "summary" and "Stop scan" or "Scan AH")
+	frame.scanButton:SetEnabled(ns.IsAuctionHouseOpen() or busy ~= nil)
+	for _, fn in ipairs(App.statusHooks) do pcall(fn, busy) end
 end
 
 function App.Show(key)
@@ -201,6 +223,7 @@ function App.Show(key)
 		local ok, err = xpcall(tab.Update, function(e) return tostring(e) end)
 		if not ok then ns.Say("|cffff4040%s view failed:|r %s", App.ui.tab, err) end
 	end
+	App.PlaceCraftButton()
 end
 
 function App.Refresh()
@@ -229,6 +252,132 @@ function App.DataChanged()
 	-- once things settle (an Auctionator scan records thousands of prices): 1 s after the last change
 	C_Timer.After(1, function()
 		if mine == generation then App.Refresh() end
+	end)
+end
+
+---------------------------------------------------------------------------
+-- Craft button
+---------------------------------------------------------------------------
+-- A click crafts all of the queue's next step at once; when its profession window isn't open,
+-- the click opens it instead (a second click crafts). Casting the profession spell needs a
+-- secure button, so this one sits on UIParent over a placeholder in the window: anchored to the
+-- window, it would make the window protected (not movable or closable in combat).
+
+local PROFESSION_SPELL = { [171] = 2259, [164] = 2018, [333] = 7411, [202] = 4036, [165] = 2108, [197] = 3908, [185] = 2550, [129] = 3273, [186] = 2656 }
+local PROFESSION_SPELL_NAME = { [186] = "Smelting" } -- Mining crafts in the Smelting window
+
+local function spellName(id)
+	if C_Spell and C_Spell.GetSpellName then
+		local n = C_Spell.GetSpellName(id)
+		if n then return n end
+	end
+	return GetSpellInfo and (GetSpellInfo(id)) or nil
+end
+
+--- The spell that opens a profession's window (by skill line).
+function App.ProfessionSpell(skill)
+	local id = PROFESSION_SPELL[skill]
+	return (id and spellName(id)) or PROFESSION_SPELL_NAME[skill] or (App.data and App.data.skills[skill])
+end
+
+local craftButton
+local function inCombat() return InCombatLockdown and InCombatLockdown() end
+
+--- The queue's next step and whether its window must be opened first: step, why, spellToOpen.
+function App.NextCraft()
+	if not App.state then App.Compute() else App.RefreshBags() end
+	local step, why = App.tabs.crafts.NextStep()
+	local open = step and not ns.ProfessionOpenFor(step.recipe.spell) and App.ProfessionSpell(step.recipe.skill) or nil
+	return step, why, open
+end
+
+local function craftLabel()
+	local ok, step, _, open = pcall(App.NextCraft)
+	if not ok or not step then return "Craft next" end
+	if open then return "Open " .. open end
+	return ("Craft %d x %s"):format(step.count, step.recipe.name)
+end
+
+local function createCraftButton()
+	local b = CreateFrame("Button", "ForeverFlipsCraftButton", UIParent, "UIPanelButtonTemplate, SecureActionButtonTemplate")
+	b:SetSize(210, 22)
+	b:Hide()
+	b:RegisterForClicks((GetCVarBool and GetCVarBool("ActionButtonUseKeyDown")) and "LeftButtonDown" or "LeftButtonUp")
+	b:SetText("Craft next")
+	b:SetScript("PreClick", function(self)
+		self.step, self.why, self.opening = nil, nil, nil
+		if inCombat() then return end
+		local ok, step, why, open = pcall(App.NextCraft)
+		if not ok then self.why = tostring(step) return end
+		self.step, self.why, self.opening = step, why, open
+		-- the secure click casts the profession spell when there is one to open
+		self:SetAttribute("type", open and "spell" or nil)
+		self:SetAttribute("spell", open)
+	end)
+	b:SetScript("PostClick", function(self)
+		if inCombat() then return ns.Say("not in combat.") end
+		if self.opening then
+			ns.Say("opening %s: click again to craft %d x %s.", self.opening, self.step.count, self.step.recipe.name)
+		else
+			App.tabs.crafts.CraftStep(self.step, self.why)
+		end
+		C_Timer.After(0.5, App.CraftButtonChanged)
+	end)
+	b:SetScript("OnEnter", function(self)
+		local ok, step, why, open = pcall(App.NextCraft)
+		if ok and step then
+			W.ShowTextTooltip(self, "Craft next", ("%d x %s (%s), all of it at once%s."):format(step.count, step.recipe.name, profName(App.state.d, step.recipe.skill), step.count < step.need and (", " .. step.need .. " needed") or ""),
+				open and ("First click opens " .. open .. ", the next crafts.") or "Parts come first; then the next step.")
+		else
+			W.ShowTextTooltip(self, "Craft next", (ok and why) or "Crafts the queue, a step per click.")
+		end
+	end)
+	b:SetScript("OnLeave", W.HideTooltip)
+	local events = CreateFrame("Frame")
+	events:RegisterEvent("PLAYER_REGEN_DISABLED")
+	events:RegisterEvent("PLAYER_REGEN_ENABLED")
+	events:SetScript("OnEvent", function(_, event)
+		-- secure frames can still be hidden as combat starts, not during it
+		if event == "PLAYER_REGEN_DISABLED" then b:Hide() else App.PlaceCraftButton() end
+	end)
+	craftButton = b
+	return b
+end
+
+--- Puts the craft button over its place in the window (when that is showing), else hides it.
+function App.PlaceCraftButton()
+	if not craftButton or inCombat() then return end
+	local slot = App.craftSlot
+	if frame and frame:IsShown() and slot and slot:IsVisible() then
+		local l, b, w, h = slot:GetRect()
+		if l then
+			craftButton:SetScale(slot:GetEffectiveScale() / UIParent:GetEffectiveScale())
+			craftButton:ClearAllPoints()
+			craftButton:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", l, b)
+			craftButton:SetSize(w, h)
+			craftButton:SetFrameStrata("DIALOG")
+			craftButton:SetText(craftLabel())
+			craftButton:Show()
+		else
+			C_Timer.After(0, App.PlaceCraftButton) -- not laid out yet
+		end
+		return
+	end
+	craftButton:Hide()
+end
+
+function App.HideCraftButton()
+	if craftButton and not inCombat() then craftButton:Hide() end
+end
+
+--- The profession window opened or closed, or the bags changed: new label (a burst: once).
+local labelPending
+function App.CraftButtonChanged()
+	if not (craftButton and craftButton:IsShown()) or labelPending then return end
+	labelPending = true
+	C_Timer.After(0.2, function()
+		labelPending = false
+		if craftButton:IsShown() then craftButton:SetText(craftLabel()) end
 	end)
 end
 
@@ -347,7 +496,7 @@ do
 		end
 		planTitle = W.Label(p, "", "GameFontNormal")
 		planTitle:SetPoint("TOPLEFT", list, "BOTTOMLEFT", vx + 8, -10)
-		planTitle:SetPoint("RIGHT", p, "RIGHT", -260, 0)
+		planTitle:SetPoint("RIGHT", p, "RIGHT", -310, 0)
 		planTitle:SetJustifyH("LEFT")
 		if planTitle.SetWordWrap then planTitle:SetWordWrap(false) end
 
@@ -364,16 +513,21 @@ do
 		actionButtons = {}
 		local clear = W.Button(p, "Clear queue", 90, function() wipe(queue()) T.Update() end)
 		clear:SetPoint("TOPRIGHT", list, "BOTTOMRIGHT", 0, -6)
-		local craft = W.Button(p, "Craft next", 90, function() T.CraftNext() end)
+		-- where the craft button goes (the button itself is secure and sits on UIParent: App.PlaceCraftButton)
+		local craft = CreateFrame("Frame", nil, p)
+		craft:SetSize(210, 22)
 		craft:SetPoint("RIGHT", clear, "LEFT", -4, 0)
-		craft:SetScript("OnEnter", function(self) W.ShowTextTooltip(self, "Craft next", "Crafts the next queued step your bags allow, parts first. Open its profession window first.") end)
-		craft:SetScript("OnLeave", W.HideTooltip)
+		App.craftSlot = craft
 		local toAtr = W.Button(p, "To Auctionator", 120, function() T.SendToAuctionator() end)
 		toAtr:SetPoint("TOPRIGHT", list, "BOTTOMRIGHT", 0, -6)
 		toAtr:SetScript("OnEnter", function(self) W.ShowTextTooltip(self, "Auctionator shopping list", "Makes (or replaces) the 'Forever Flips' list in Auctionator's Shopping tab with these items and amounts.") end)
 		toAtr:SetScript("OnLeave", W.HideTooltip)
+		local checkShop = W.Button(p, "Check AH", 90, function() T.CheckShopping() end)
+		checkShop:SetPoint("RIGHT", toAtr, "LEFT", -4, 0)
+		checkShop:SetScript("OnEnter", function(self) W.ShowTextTooltip(self, "Check AH prices", "Searches the AH for each item to buy, so the costs walk the real listings. AH must be open.") end)
+		checkShop:SetScript("OnLeave", W.HideTooltip)
 		actionButtons.queue = { clear, craft }
-		actionButtons.shop = { toAtr }
+		actionButtons.shop = { toAtr, checkShop }
 
 		local function bottom(l, below)
 			l:SetPoint("TOPLEFT", below, "BOTTOMLEFT", 0, -34)
@@ -546,24 +700,42 @@ do
 			planTitle:SetText(#x.buy > 0 and (("%d items, about %s"):format(#x.buy, W.Money(x.total, true)) .. (x.missing > 0 and (C.bad .. ", " .. x.missing .. " without a price|r") or "")) or (C.muted .. "Nothing to buy.|r"))
 			shopList:SetData(x.buy, next(queue()) and "You have everything for the queue." or "Queue crafts to get a shopping list.")
 		end
+		App.PlaceCraftButton()
 	end
 
-	function T.CraftNext()
+	--- The next step of the queue to craft: the first (parts first) your bags have the reagents
+	--- for, with all of it you can make now. Or nil and why not.
+	function T.NextStep()
 		local x = T.Expanded()
 		local bags = App.state.bags
 		for _, c in ipairs(x.crafts) do
 			local n = math.min(c.count, ns.Queue.CraftableFrom(c.recipe, bags))
-			if n > 0 then
-				local ok, why = ns.CraftRecipe(c.recipe.spell, n)
-				if ok then
-					ns.Say("crafting %d x %s", n, c.recipe.name)
-				else
-					ns.Say("%s: %s (%s)", c.recipe.name, why or "could not craft", profName(App.state.d, c.recipe.skill))
-				end
-				return
-			end
+			if n > 0 then return { recipe = c.recipe, count = n, need = c.count } end
 		end
-		ns.Say(#x.crafts > 0 and "nothing in the queue can be made from your bags yet: see the shopping list." or "the queue is empty.")
+		return nil, #x.crafts > 0 and "nothing in the queue can be made from your bags yet: see the shopping list." or "the queue is empty."
+	end
+
+	--- Crafts all of a step at once (like Create All, capped at what the queue needs).
+	function T.CraftStep(step, why)
+		if not step then return ns.Say(why or "the queue is empty.") end
+		if UnitCastingInfo and UnitCastingInfo("player") then return ns.Say("still crafting; click again when it's done.") end
+		local ok, err = ns.CraftRecipe(step.recipe.spell, step.count)
+		if ok then
+			ns.Say("crafting %d x %s%s", step.count, step.recipe.name, step.count < step.need and (" (%d more once you have the reagents)"):format(step.need - step.count) or "")
+		else
+			ns.Say("%s: %s (%s)", step.recipe.name, err or "could not craft", profName(App.state.d, step.recipe.skill))
+		end
+	end
+
+	function T.CraftNext() T.CraftStep(T.NextStep()) end
+
+	function T.CheckShopping()
+		if ns.Scan.busy == "listings" then return ns.Scan.Stop() end
+		if not ns.IsAuctionHouseOpen() then return ns.Say("open the Auction House first.") end
+		local ids = {}
+		for _, b in ipairs(T.Expanded().buy) do if b.kind ~= "vendor" then ids[#ids + 1] = b.item end end
+		if #ids == 0 then return ns.Say("nothing to buy on the AH.") end
+		if not ns.Scan.Listings(ids, nil, function(n) ns.Say("checked the AH for %d items.", n) end) then ns.Say("busy: %s", ns.Scan.progress) end
 	end
 
 	function T.SendToAuctionator()
@@ -619,18 +791,29 @@ do
 		local minp = W.Cycle(p, "Profit ", 120, function() return { { 0, "any" }, { 1000, "10s+" }, { 10000, "1g+" }, { 50000, "5g+" }, { 200000, "20g+" } } end,
 			function() return ui.minProfit end, function(v) ui.minProfit = v T.Update() end, "Least total profit for the cheap listings")
 		minp:SetPoint("LEFT", pct, "RIGHT", 6, 0)
+		local check = W.Button(p, "Check listings", 120, function() T.CheckListings(false) end)
+		check:SetPoint("TOPRIGHT", 0, 0)
+		check:SetScript("OnEnter", function(self) W.ShowTextTooltip(self, "Check listings", "Searches the AH for each deal shown (the top " .. T.CHECK_MAX .. ") and counts every listing at the good price. AH must be open; about a second an item.", "Click while checking: stop.") end)
+		check:SetScript("OnLeave", W.HideTooltip)
+		App.statusHooks[#App.statusHooks + 1] = function(busy) check:SetText(busy == "listings" and "Stop checking" or "Check listings") end
 		note = W.Label(p, "", "GameFontDisableSmall")
 		note:SetPoint("LEFT", minp, "RIGHT", 10, 0)
-		note:SetPoint("RIGHT", p, "RIGHT", 0, 0)
+		note:SetPoint("RIGHT", check, "LEFT", -6, 0)
 		note:SetJustifyH("LEFT")
+		if note.SetWordWrap then note:SetWordWrap(false) end
 		controls = { mode, pct, minp }
 
 		local function srcTag(src) return src == "auctionator" and (C.muted .. " A|r") or src == "tsm" and (C.muted .. " T|r") or "" end
+		local UNITS_TIP = "How many are at the good price. Green: every listing counted (Check listings). +: maybe more; only the cheapest listings are known"
+		local function units(r)
+			if r.checked then return C.good .. r.units .. (r.more and "+" or "") .. "|r" end
+			return r.units .. (r.more and "+" or "")
+		end
 		flips = W.List(p, {
 			{ label = "Item", width = 260, icon = function(r) return W.ItemIcon(r.item) end, text = function(r) return itemText(App.state.d, r.item) end, sort = function(r) return Data.ItemName(App.state.d, r.item) end },
 			{ label = "Cheapest", width = 90, align = "RIGHT", text = function(r) return W.Money(r.price) .. srcTag(r.src) end, sort = function(r) return r.price end, tip = "A = from Auctionator, T = from TSM; else your own scan" },
 			{ label = "Vendor pays", width = 90, align = "RIGHT", text = function(r) return W.Money(r.vendor) end, sort = function(r) return r.vendor end },
-			{ label = "Units", width = 60, align = "RIGHT", text = function(r) return r.units .. (r.more and "+" or "") end, sort = function(r) return r.units end },
+			{ label = "Units", width = 60, align = "RIGHT", text = units, sort = function(r) return r.units end, tip = UNITS_TIP },
 			{ label = "Profit", width = 100, align = "RIGHT", text = function(r) return W.Money(r.profit) end, sort = function(r) return r.profit end, tip = "Buying the cheap units and selling them to a vendor" },
 		}, { sortBy = 5, onClick = function(row) App.SearchItem(row.item) end, onEnter = function(f, row) W.ShowItemTooltip(f, row.item) end })
 		flips:SetPoint("TOPLEFT", 0, -30)
@@ -641,7 +824,7 @@ do
 			{ label = "Cheapest", width = 85, align = "RIGHT", text = function(r) return W.Money(r.price) .. srcTag(r.src) end, sort = function(r) return r.price end },
 			{ label = "Usual", width = 85, align = "RIGHT", text = function(r) return W.Money(r.reference) .. (r.refSrc == "auctionator" and (C.muted .. " A|r") or "") end, sort = function(r) return r.reference end, tip = "TSM's region average sale price (or market value); A = median of Auctionator's daily lows over two weeks" },
 			{ label = "%", width = 45, align = "RIGHT", text = function(r) return ("%d%%"):format(math.floor(r.pct * 100 + 0.5)) end, sort = function(r) return r.pct end },
-			{ label = "Units", width = 50, align = "RIGHT", text = function(r) return r.units .. (r.more and "+" or "") end, sort = function(r) return r.units end },
+			{ label = "Units", width = 50, align = "RIGHT", text = units, sort = function(r) return r.units end, tip = UNITS_TIP },
 			{ label = "Profit", width = 90, align = "RIGHT", text = function(r) return W.Money(r.profit) end, sort = function(r) return r.profit end, tip = "Reselling them at the usual price, after the AH cut" },
 			{ label = "Sold/day", width = 60, align = "RIGHT", text = function(r) return r.soldPerDay and W.Num(r.soldPerDay, 1) or "-" end, sort = function(r) return r.soldPerDay end },
 		}, { sortBy = 6, onClick = function(row) App.SearchItem(row.item) end, onEnter = function(f, row) W.ShowItemTooltip(f, row.item) end })
@@ -649,20 +832,53 @@ do
 		market:SetPoint("BOTTOMRIGHT", 0, 0)
 	end
 
+	T.CHECK_MAX = 40
+
+	--- Searches the AH for the deals shown, best first, skipping ones checked in the last 5 min.
+	function T.CheckListings(auto)
+		if ns.Scan.busy == "listings" then return ns.Scan.Stop() end
+		if not ns.IsAuctionHouseOpen() then return ns.Say("open the Auction House first.") end
+		local ids, now = {}, ns.Now()
+		for _, r in ipairs(T.rows or {}) do
+			if #ids >= T.CHECK_MAX then break end
+			if not (r.checked and r.t and now - r.t < 300) then ids[#ids + 1] = r.item end
+		end
+		if #ids == 0 and auto then return end
+		if #ids == 0 then return ns.Say(#(T.rows or {}) > 0 and "every deal shown was checked in the last 5 minutes." or "no deals to check: scan the AH first.") end
+		if not ns.Scan.Listings(ids, nil, function(n) ns.Say("checked the listings of %d items.", n) end) then ns.Say("busy: %s", ns.Scan.progress) end
+	end
+
+	-- after a scan, with the Deals tab open: count the listings of the deals it found
+	ns.Scan.onSummaryDone = function()
+		if frame and frame:IsShown() and App.ui.tab == "deals" then
+			C_Timer.After(1.5, function()
+				App.Refresh()
+				if not ns.Scan.busy then T.CheckListings(true) end
+			end)
+		end
+	end
+
 	function T.Update()
 		local s, ui = App.state, App.ui.deals
 		for _, c in ipairs(controls) do c:Refresh() end
+		local checked = 0
 		if ui.mode == "vendor" then
 			market:Hide() flips:Show()
 			local rows = {}
 			for _, r in ipairs(Deals.VendorFlips(s.d, s.market)) do if r.profit >= ui.minProfit then rows[#rows + 1] = r end end
+			T.rows = rows
 			flips:SetData(rows, "No listing below what a vendor pays. Scan the AH for fresh prices.")
 			note:SetText("Buy and sell to any vendor: guaranteed profit.")
 		else
 			flips:Hide() market:Show()
 			local rows = Deals.UnderMarket(s.d, s.market, { maxPct = ui.maxPct, minProfit = ui.minProfit, minSold = 1, cut = App.ui.cut, atr = s.atr })
+			T.rows = rows
 			market:SetData(rows, "No listing that far under its usual price.")
 			note:SetText(Prices.TsmAvailable() and "Usual price: TSM's region sales; only items selling 1+ a day." or "Usual price: Auctionator's two-week median (install TSM for sales data).")
+		end
+		for _, r in ipairs(T.rows) do if r.checked then checked = checked + 1 end end
+		if #T.rows > 0 and checked < #T.rows then
+			note:SetText(note:GetText() .. "  " .. C.accent .. (checked > 0 and (checked .. "/" .. #T.rows .. " counted.") or "Check listings counts them.") .. "|r")
 		end
 	end
 end
@@ -908,9 +1124,13 @@ local function createMinimapButton()
 	end)
 	b:SetScript("OnDragStop", function(self) self:SetScript("OnUpdate", nil) end)
 	b:SetScript("OnClick", function(_, button)
-		if button == "RightButton" then ns.StartScan() else App.Toggle() end
+		if button == "RightButton" then
+			if ns.Scan and ns.Scan.busy then ns.Scan.Stop() else ns.StartScan() end
+		else
+			App.Toggle()
+		end
 	end)
-	b:SetScript("OnEnter", function(self) W.ShowTextTooltip(self, "Forever Flips", "Click: open", "Right-click: scan the AH (when open)", "Drag: move") end)
+	b:SetScript("OnEnter", function(self) W.ShowTextTooltip(self, "Forever Flips", "Click: open", "Right-click: scan the AH (when open; again: stop)", "Drag: move") end)
 	b:SetScript("OnLeave", W.HideTooltip)
 	place()
 end
@@ -920,4 +1140,5 @@ function App.Init(DB)
 	DB.ui = DB.ui or {}
 	App.ui = merge(DB.ui, DEFAULTS)
 	createMinimapButton()
+	createCraftButton()
 end

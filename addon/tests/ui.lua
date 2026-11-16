@@ -43,6 +43,17 @@ function Methods:GetCenter() return 0, 0 end
 function Methods:GetEffectiveScale() return 1 end
 function Methods:RegisterEvent(e) local ev = rawget(self, "events") or {} self.events = ev ev[e] = true end
 function Methods:Click(button) if self.scripts.OnClick then self.scripts.OnClick(self, button or "LeftButton") end end
+function Methods:IsVisible()
+	local f = self
+	while f do
+		if not rawget(f, "shown") then return false end
+		f = rawget(f, "parent")
+	end
+	return true
+end
+function Methods:GetRect() return 100, 40, self.w, self.h end
+function Methods:SetAttribute(k, v) local a = rawget(self, "attrs") or {} self.attrs = a a[k] = v end
+function Methods:GetAttribute(k) local a = rawget(self, "attrs") return a and a[k] end
 
 local frames = {}
 CreateFrame = function(kind, name, parent, template)
@@ -58,9 +69,22 @@ tinsert = table.insert
 wipe = function(t) for k in pairs(t) do t[k] = nil end return t end
 time, date = os.time, os.date
 GetServerTime = os.time
+-- timers run when the test says so: those due within `upTo` seconds (default 5; listing
+-- timeouts are 8, so they wait unless asked for)
 local timers = {}
-C_Timer = { After = function(_, fn) timers[#timers + 1] = fn end }
-local function runTimers() while #timers > 0 do table.remove(timers, 1)() end end
+C_Timer = { After = function(d, fn) timers[#timers + 1] = { d, fn } end }
+local function runTimers(upTo)
+	upTo = upTo or 5
+	local ran = true
+	while ran do
+		ran = false
+		for i, t in ipairs(timers) do
+			if t[1] <= upTo then table.remove(timers, i) t[2]() ran = true break end
+		end
+	end
+end
+local clock = 1000
+GetTime = function() clock = clock + 0.1 return clock end
 SlashCmdList = {}
 print = function(...) local t = {} for i = 1, select("#", ...) do t[#t + 1] = tostring(select(i, ...)) end chat[#chat + 1] = table.concat(t, " ") log("[chat] %s", chat[#chat]) end
 UnitName = function() return os.getenv("CHAR_NAME") or "Tudor" end
@@ -238,6 +262,112 @@ if not os.getenv("SV") then
 	eventFrame.scripts.OnEvent(eventFrame, "UNIT_SPELLCAST_SUCCEEDED", "player", "c1", 3938)
 	assert(ns.CharData().queue[3938] == 1, "a crafted Bronze Tube comes off the queue")
 	log("queue, shopping list, Auctionator, AH search, craft next: ok")
+
+	-- the craft button: opens the step's profession window first, then crafts all of the step
+	local cb = _G.ForeverFlipsCraftButton
+	assert(cb and cb.parent == UIParent, "secure craft button on UIParent")
+	App.Show("crafts")
+	App.ui.crafts.view = "queue"
+	crafts.Update()
+	runTimers()
+	assert(cb.shown, "craft button over the queue view")
+	assert(cb.text == "Open Smelting", "first it opens the profession: " .. tostring(cb.text))
+	crafted = nil
+	cb.scripts.PreClick(cb, "LeftButton")
+	assert(cb.attrs.type == "spell" and cb.attrs.spell == "Smelting", "the secure click casts Smelting")
+	cb.scripts.PostClick(cb, "LeftButton")
+	assert(not crafted, "nothing crafted while the window opens")
+	C_TradeSkillUI.GetAllRecipeIDs = function() return { 2659, 3307, 10097 } end
+	C_TradeSkillUI.GetRecipeInfo = function() return { learned = true } end
+	C_TradeSkillUI.GetBaseProfessionInfo = function() return { professionName = "Mining", skillLevel = 175, maxSkillLevel = 225 } end
+	eventFrame.scripts.OnEvent(eventFrame, "TRADE_SKILL_SHOW")
+	runTimers()
+	assert(cb.text == "Craft 2 x Smelt Bronze", "then it crafts: " .. tostring(cb.text))
+	cb.scripts.PreClick(cb, "LeftButton")
+	assert(cb.attrs.type == nil, "nothing to open now")
+	cb.scripts.PostClick(cb, "LeftButton")
+	assert(crafted and crafted[1] == 2659 and crafted[2] == 2, "all of the step at once: " .. tostring(crafted and crafted[2]))
+	eventFrame.scripts.OnEvent(eventFrame, "TRADE_SKILL_CLOSE")
+	runTimers()
+	assert(cb.text == "Open Smelting", "closed: open it again first")
+	App.Show("deals")
+	assert(not cb.shown, "hidden away from the queue view")
+	SlashCmdList.FLIPEXPORT("") runTimers()
+	assert(not cb.shown, "hidden with the window")
+	SlashCmdList.FLIPEXPORT("") runTimers()
+	log("craft button: opens the profession, then crafts a whole step: ok")
+
+	-- the AH scan: browse pages until the AH has sent all, then the deals' listings, one search each
+	local page1 = { { itemKey = { itemID = 2840 }, minPrice = 12, totalQuantity = 50 }, { itemKey = { itemID = 3576 }, minPrice = 20, totalQuantity = 40 } }
+	local page2 = { { itemKey = { itemID = 3860 }, minPrice = 300, totalQuantity = 12 }, { itemKey = { itemID = 2592 }, minPrice = 5, totalQuantity = 30 } }
+	local browse, full, searches, answer = {}, false, {}, {}
+	local LISTED = { [2592] = { { 5, 10 }, { 40, 20 } }, [3860] = { { 300, 2 }, { 350, 3 }, { 380, 4 }, { 500, 7 } }, [3576] = { { 20, 6 }, { 30, 34 } } }
+	C_AuctionHouse = {
+		IsThrottledMessageSystemReady = function() return true end,
+		SendBrowseQuery = function() browse, full = {}, false for _, r in ipairs(page1) do browse[#browse + 1] = r end end,
+		GetBrowseResults = function() return browse end,
+		HasFullBrowseResults = function() return full end,
+		RequestMoreBrowseResults = function() for _, r in ipairs(page2) do browse[#browse + 1] = r end full = true end,
+		MakeItemKey = function(id) return { itemID = id } end,
+		SendSearchQuery = function(key) searches[#searches + 1] = key.itemID end,
+		GetNumCommoditySearchResults = function(id) return #(LISTED[id] or {}) end,
+		GetCommoditySearchResultInfo = function(id, i) local l = LISTED[id][i] return { unitPrice = l[1], quantity = l[2] } end,
+		HasFullCommoditySearchResults = function() return true end,
+		GetNumItemSearchResults = function(key) return #(LISTED[key.itemID] or {}) end,
+		GetItemSearchResultInfo = function(key, i) local l = LISTED[key.itemID][i] return { buyoutAmount = l[1] * l[2], quantity = l[2] } end,
+		HasFullItemSearchResults = function() return true end,
+	}
+	local scanFrame
+	for _, f in ipairs(frames) do local ev = rawget(f, "events") if ev and ev.AUCTION_HOUSE_BROWSE_RESULTS_UPDATED then scanFrame = f end end
+	local function fire(...) scanFrame.scripts.OnEvent(scanFrame, ...) end
+	App.ui.deals.mode, App.ui.deals.minProfit = "vendor", 0
+	App.Show("deals")
+	SlashCmdList.FLIPEXPORT("scan")
+	assert(ns.Scan.busy == "summary", "scan started")
+	fire("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+	fire("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED") -- the same page again: no second request
+	assert(#browse == 4, "asked for the next page once: " .. #browse)
+	fire("AUCTION_HOUSE_BROWSE_RESULTS_ADDED", page2)
+	assert(not ns.Scan.busy and DB.ah.kind == "summary" and #DB.ah.i == 4, "summary scan saved")
+	local rowOf = {}
+	for _, r in ipairs(DB.ah.i) do rowOf[r[1]] = r end
+	assert(#rowOf[3860][4] == 3 and #rowOf[2840][4] == 0, "the full scan's levels kept only where nothing changed")
+	-- with the Deals tab open, a scan goes on to check the deals' listings
+	runTimers()
+	assert(ns.Scan.busy == "listings" and #searches == 1, "deals checked after the scan")
+	local n = 0
+	while ns.Scan.busy and n < 20 do
+		n = n + 1
+		local id = searches[#searches]
+		if id == 3860 then fire("ITEM_SEARCH_RESULTS_UPDATED", { itemID = id }) else fire("COMMODITY_SEARCH_RESULTS_UPDATED", id) end
+	end
+	assert(not ns.Scan.busy and #searches == 3, "3 deals searched: " .. #searches)
+	assert(DB.detail[2592].complete and DB.detail[2592].qty == 30, "every listing of wool cloth")
+	runTimers()
+	local deals = {}
+	for _, r in ipairs(App.tabs.deals.rows) do deals[r.item] = r end
+	assert(deals[2592].checked and deals[2592].units == 10 and not deals[2592].more, "10 wool cloth under the vendor price")
+	assert(deals[3860].checked and deals[3860].units == 9 and deals[3576].units == 6, "mithril and tin counted")
+	log("deals after checking: wool %d, mithril %d, tin %d units", deals[2592].units, deals[3860].units, deals[3576].units)
+	-- the next scan keeps the counts while an item's cheapest price and amount are the same
+	SlashCmdList.FLIPEXPORT("scan")
+	fire("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+	fire("AUCTION_HOUSE_BROWSE_RESULTS_ADDED", page2)
+	for _, r in ipairs(DB.ah.i) do rowOf[r[1]] = r end
+	assert(#rowOf[2592][4] == 2 and rowOf[2592][5] == true, "wool cloth's listings kept")
+	runTimers()
+	assert(not ns.Scan.busy, "nothing to check again so soon")
+	for _, r in ipairs(App.tabs.deals.rows) do deals[r.item] = r end
+	assert(deals[2592].checked and deals[2592].units == 10, "still counted")
+	-- an item that isn't listed any more
+	LISTED[3576] = {}
+	ns.Scan.Listings({ 3576 })
+	fire("COMMODITY_SEARCH_RESULTS_UPDATED", 3576)
+	runTimers()
+	assert(not App.state.market:Ah(3576), "tin bar gone from the AH")
+	runTimers(math.huge) -- the listing timeouts: nothing left to time out
+	log("AH scan without the 15-minute limit, listing checks: ok")
+	C_AuctionHouse = nil
 	Auctionator, C_TradeSkillUI = nil, nil
 end
 
