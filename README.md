@@ -15,6 +15,10 @@ The addon now does the main work in game, no import needed: type `/flip` or clic
 - **Deals**: listings below what a vendor pays, and listings well under the usual price.
 - **Leveling**: every recipe that gives a point at your skill, and the cheapest path to a target, with learning costs.
 - **Sales**: income per day and per item from your AH mail.
+- **Queue and shopping list** (bottom of Crafts): right-click a craft (shift: 5) or use Queue +1/+5/+20. The queue works out the parts to craft first (bars before tubes) and what to buy after your bags and bank; **To Auctionator** puts the shopping list into Auctionator's Shopping tab, and **Craft next** crafts the next step your bags allow (with its profession window open). Finished crafts come off the queue.
+- With the AH open, clicking an item in any list searches the AH for it (Auctionator's search when installed).
+
+TradeSkillMaster is used for its data only: Forever Flips sets TSM's own options so it stays out of sight (Blizzard's AH, mail, vendor and profession windows, no TSM tooltips, banking window, destroy pop-up or minimap icon). `/flip tsm` turns that off; then turn TSM's windows back on in its settings. When the TSM app's prices for your auction house are newer than your scan and Auctionator, they win.
 
 Prices, newest first: your own full scan (`/flip scan` or the Scan AH button, AH open), Auctionator's database when it saw an item later (its scans and searches), and TradeSkillMaster for the rest. With the TSM addon and its desktop app installed, sold per day, sale rate and market value come from TSM too.
 

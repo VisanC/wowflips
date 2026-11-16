@@ -9,8 +9,8 @@ time, date = os.time, os.date
 local ns = {}
 local function load(file) assert(loadfile(file))("FlipExport", ns) end
 load("addon/tests/fixtures/GameData.lua")
-for _, f in ipairs({ "Logic/Data.lua", "Logic/Prices.lua", "Logic/Engine.lua", "Logic/Leveling.lua", "Logic/Deals.lua", "Logic/Sales.lua" }) do load(ROOT .. f) end
-local Data, Prices, Engine, Leveling, Deals, Sales = ns.Data, ns.Prices, ns.Engine, ns.Leveling, ns.Deals, ns.Sales
+for _, f in ipairs({ "Logic/Data.lua", "Logic/Prices.lua", "Logic/Engine.lua", "Logic/Leveling.lua", "Logic/Deals.lua", "Logic/Sales.lua", "Logic/Queue.lua" }) do load(ROOT .. f) end
+local Data, Prices, Engine, Leveling, Deals, Sales, Queue = ns.Data, ns.Prices, ns.Engine, ns.Leveling, ns.Deals, ns.Sales, ns.Queue
 
 local passed = 0
 local function eq(a, b, msg)
@@ -200,6 +200,24 @@ test("sales ledger", function()
 	eq(tube.soldUnits, 6)
 	eq(tube.crafted, 4)
 	eq(tube.expired, 1)
+end)
+
+test("queue: parts first, leftovers, shopping cost along the listings", function()
+	eq(Queue.AhCost({ price = 100, levels = { { 100, 2 }, { 150, 3 } } }, 4), 100 * 2 + 150 * 2)
+	eq(Queue.AhCost({ price = 100, levels = { { 100, 2 } } }, 5), 100 * 5, "past the known listings: the last price")
+	local m = market({ { 2840, 10, 99, {} }, { 3576, 20, 99, {} }, { 2841, 100, 99, {} }, { 2592, 30, 99, {} } })
+	local e = Engine.New(d, m, { craftMode = "known", known = known(2659, 3938, 3953) })
+	-- 2 tubes + 1 framework = 6 bronze bars; 1 in the bank: 5 more = 3 smelts (one bar left over)
+	local x = Queue.Expand(e, { { recipe = d.bySpell[3938], count = 2 }, { recipe = d.bySpell[3953], count = 1 } }, { [2841] = 1, [2840] = 1 })
+	eq(x.crafts[1].recipe.spell, 2659, "smelting first")
+	eq(x.crafts[1].count, 3)
+	local buy = {}
+	for _, b in ipairs(x.buy) do buy[b.item] = b end
+	eq(buy[2840].qty, 2, "copper: 3 needed, 1 in the bank")
+	eq(buy[3576].qty, 3, "tin")
+	eq(buy[2880].kind, "vendor", "weak flux from a vendor")
+	eq(buy[2592].qty, 1, "wool cloth")
+	eq(x.total, 2 * 10 + 3 * 20 + 2 * 100 + 30)
 end)
 
 print(("logic tests: %d passed"):format(passed))

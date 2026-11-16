@@ -418,6 +418,13 @@ local function recordCast(unit, spellID)
 	local t = now()
 	local key = spellID .. "|" .. (t - t % 3600)
 	L.crafts[key] = (L.crafts[key] or 0) + 1
+	-- one less to make in the craft queue
+	local q = charData().queue
+	if q and q[spellID] then
+		q[spellID] = q[spellID] - 1
+		if q[spellID] <= 0 then q[spellID] = nil end
+		if ns.App then ns.App.DataChanged() end
+	end
 end
 
 local function exportLedger()
@@ -704,6 +711,70 @@ ns.ReadSkills = readSkills
 ns.AuctionatorDB = auctionatorDB
 ns.StartScan = function() startScan() end
 ns.IsAuctionHouseOpen = function() return ahOpen end
+--- Crafts `count` of a recipe through the open profession window (the click that calls this is
+--- the hardware event crafting needs). Returns true, or false and why not.
+ns.CraftRecipe = function(spell, count)
+	if C_TradeSkillUI and C_TradeSkillUI.CraftRecipe and C_TradeSkillUI.GetAllRecipeIDs then
+		local ok, err = pcall(C_TradeSkillUI.CraftRecipe, spell, count)
+		if ok then return true end
+		return false, tostring(err)
+	end
+	if GetNumTradeSkills and DoTradeSkill and GetTradeSkillRecipeLink then
+		for i = 1, GetNumTradeSkills() do
+			local link = GetTradeSkillRecipeLink(i)
+			if link and tonumber(link:match("enchant:(%d+)")) == spell then
+				DoTradeSkill(i, count)
+				return true
+			end
+		end
+	end
+	if GetNumCrafts and DoCraft and GetCraftItemLink then
+		for i = 1, GetNumCrafts() do
+			local link = GetCraftItemLink(i)
+			if link and tonumber(link:match("enchant:(%d+)")) == spell then
+				DoCraft(i)
+				return true
+			end
+		end
+	end
+	return false, "open the profession window for it first"
+end
+
+--- Searches the open Auction House for an item: Auctionator's exact search when it is
+--- installed, else Blizzard's search box.
+ns.SearchAH = function(name)
+	if not ahOpen or type(name) ~= "string" or name == "" then return false end
+	if Auctionator and Auctionator.API and Auctionator.API.v1 and Auctionator.API.v1.MultiSearchExact then
+		if pcall(Auctionator.API.v1.MultiSearchExact, "Forever Flips", { name }) then return true end
+	end
+	local bar = AuctionHouseFrame and AuctionHouseFrame.SearchBar
+	if bar and bar.SearchBox then
+		bar.SearchBox:SetText(name)
+		if bar.StartSearch then bar:StartSearch() elseif bar.SearchButton then bar.SearchButton:Click() end
+		return true
+	end
+	if BrowseName and AuctionFrameBrowse_Search then
+		BrowseName:SetText(name)
+		AuctionFrameBrowse_Search()
+		return true
+	end
+	return false
+end
+
+--- Puts a shopping list into Auctionator ({ { name, quantity }, ... }); returns the list name.
+ns.AuctionatorShoppingList = function(items)
+	local api = Auctionator and Auctionator.API and Auctionator.API.v1
+	if not (api and api.CreateShoppingList and api.ConvertToSearchString) then return nil, "Auctionator is not loaded" end
+	local strings = {}
+	for _, it in ipairs(items) do
+		local ok, str = pcall(api.ConvertToSearchString, "Forever Flips", { searchString = it[1], isExact = true, quantity = it[2] })
+		strings[#strings + 1] = ok and str or ('"' .. it[1] .. '"')
+	end
+	local ok, err = pcall(api.CreateShoppingList, "Forever Flips", "Forever Flips", strings)
+	if not ok then return nil, tostring(err) end
+	return "Forever Flips"
+end
+
 ns.ReadBagCounts = function()
 	local counts = {}
 	for bag = 0, (NUM_BAG_SLOTS or 4) do readContainer(bag, counts) end
@@ -799,6 +870,10 @@ SlashCmdList.FLIPEXPORT = function(msg)
 	elseif cmd == "export" then export()
 	elseif cmd == "status" then status()
 	elseif cmd == "" and ns.App then ns.App.Toggle()
+	elseif cmd == "tsm" then
+		DB.ui = DB.ui or {}
+		DB.ui.quietTsm = DB.ui.quietTsm == false
+		say(DB.ui.quietTsm and "TSM stays out of sight (its windows, tooltips and minimap icon off). Applies from the next /reload." or "TSM is left as it is from now on. Turn its windows and tooltips back on in TSM's own settings (/tsm).")
 	else
 		say("|cffffff00/flip|r opens Forever Flips; |cffffff00/flip scan|r (AH open), |cffffff00/flip export|r (for the website), |cffffff00/flip status|r")
 		say("Open your bank, each profession window and your profession trainers once so they're included.")

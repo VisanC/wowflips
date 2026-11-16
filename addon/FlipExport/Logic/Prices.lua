@@ -105,29 +105,37 @@ local Market = {}
 Market.__index = Market
 
 --- AH row for an item: { min, qty, levels, price, src = "scan"|"auctionator"|"tsm", t }, or nil.
+--- TSM's price wins when the TSM app downloaded it after the scan or Auctionator saw the item
+--- (or when neither has it).
 function Market:Ah(id)
 	local row = self.ah[id]
-	if row then return row end
-	if self.useTsm then
+	if self.useTsm and (not row or (self.tsmTime and self.tsmTime > (row.t or 0))) then
 		local cached = self.tsmRows[id]
 		if cached == nil then
 			local recent = Prices.TSM("DBRecent", id)
 			local min = Prices.TSM("DBMinBuyout", id)
 			local price = (recent and recent > 0) and recent or min
-			cached = (price and price > 0) and { min = min or price, qty = 0, levels = {}, price = price, src = "tsm" } or false
+			if price and price > 0 then
+				local qty = row and row.qty or 0
+				-- with "lowest listing" (depth 1) the price is TSM's lowest buyout
+				if self.depth <= 1 and min and min > 0 then price = min end
+				cached = { min = min or price, qty = qty, levels = { { min or price, qty } }, price = price, src = "tsm", t = self.tsmTime }
+			else
+				cached = false
+			end
 			self.tsmRows[id] = cached
 		end
-		return cached or nil
+		if cached then return cached end
 	end
-	return nil
+	return row
 end
 
 --- @param d     game data (Data.Build)
---- @param opts  { scan = DB.ah, atr = Auctionator's price table, depth = 3, learnedVendor = DB.vendor, useTsm = true }
+--- @param opts  { scan = DB.ah, atr = Auctionator's price table, depth = 3, learnedVendor = DB.vendor, useTsm = true, tsmTime = when the TSM app downloaded realm prices }
 function Prices.Build(d, opts)
 	opts = opts or {}
 	local depth = opts.depth or 3
-	local m = setmetatable({ ah = {}, vendor = {}, tsmRows = {}, useTsm = opts.useTsm ~= false and Prices.TsmAvailable(), scanTime = 0, depth = depth }, Market)
+	local m = setmetatable({ ah = {}, vendor = {}, tsmRows = {}, useTsm = opts.useTsm ~= false and Prices.TsmAvailable(), tsmTime = opts.tsmTime, scanTime = 0, depth = depth }, Market)
 	local scan = opts.scan
 	if type(scan) == "table" and type(scan.i) == "table" then
 		m.scanTime = scan.t or 0

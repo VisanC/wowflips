@@ -90,6 +90,27 @@ end
 assert(ns.App and ns.GameData, "addon did not load")
 
 if os.getenv("SV") then dofile(os.getenv("SV")) end
+
+-- TSM: its options are set before it reads them, and the app data's download time is noted
+TradeSkillMasterDB = {
+	["g@ @auctionUIContext@showDefault"] = false, ["g@ @tooltipOptions@enabled"] = true,
+	["g@ @bankingUIContext@isOpen"] = true, ["g@ @coreOptions@minimapIcon"] = { hide = false, minimapPos = 220 },
+}
+local tsmLoaded
+TSM_APPHELPER_LOAD_DATA = function(tag, where, data) tsmLoaded = tag end
+FlipExportDB = FlipExportDB or {}
+for _, f in ipairs(frames) do
+	local ev = rawget(f, "events")
+	if ev and ev.ADDON_LOADED then f.scripts.OnEvent(f, "ADDON_LOADED", "TradeSkillMaster") end
+end
+TSM_APPHELPER_LOAD_DATA("AUCTIONDB_NON_COMMODITY_DATA", "PvP-Alliance", "return {downloadTime=1794835141,fields={},data={}}")
+assert(tsmLoaded == "AUCTIONDB_NON_COMMODITY_DATA", "TSM still gets its data")
+assert(ns.TsmDataTime("AUCTIONDB_NON_COMMODITY_DATA") == 1794835141, "download time noted")
+assert(TradeSkillMasterDB["g@ @auctionUIContext@showDefault"] == true and TradeSkillMasterDB["g@ @tooltipOptions@enabled"] == false, "TSM windows and tooltips off")
+assert(TradeSkillMasterDB["g@ @bankingUIContext@isOpen"] == false and TradeSkillMasterDB["g@ @coreOptions@minimapIcon"].hide == true, "TSM banking and minimap icon off")
+assert(TradeSkillMasterDB["g@ @mailingUIContext@showDefault"] == nil, "keys TSM does not have are left alone")
+log("TSM kept out of sight, download time noted: ok")
+TradeSkillMasterDB, TSM_APPHELPER_LOAD_DATA = nil, nil
 local eventFrame
 for _, f in ipairs(frames) do local ev = rawget(f, "events") if ev and ev.ADDON_LOADED then eventFrame = f end end
 eventFrame.scripts.OnEvent(eventFrame, "ADDON_LOADED", "FlipExport")
@@ -167,9 +188,58 @@ for _, tab in ipairs({ "crafts", "deals", "leveling", "sales" }) do
 	end
 	runTimers()
 end
+-- craft queue, shopping list, Auctionator list, AH search, craft next, queue counting down
+if not os.getenv("SV") then
+	local crafts = App.tabs.crafts
+	local bagItems = { { itemID = 2840, stackCount = 10 }, { itemID = 3576, stackCount = 10 } }
+	C_Container = {
+		GetContainerNumSlots = function(bag) return bag == 0 and #bagItems or 0 end,
+		GetContainerItemInfo = function(bag, slot) return bagItems[slot] end,
+	}
+	local created, searched, crafted
+	Auctionator = { API = { v1 = {
+		CreateShoppingList = function(_, name, list) created = { name, list } end,
+		ConvertToSearchString = function(_, t) return '"' .. t.searchString .. '";;;;;;;;;;;#;;' .. t.quantity end,
+		MultiSearchExact = function(_, terms) searched = terms[1] end,
+	} } }
+	C_TradeSkillUI = { GetAllRecipeIDs = function() return {} end, CraftRecipe = function(spell, n) crafted = { spell, n } end }
+	App.Refresh()
+	crafts.AddToQueue(App.state.d.bySpell[3938], 2) -- Bronze Tube: 2 bronze bars + weak flux each
+	crafts.AddToQueue(App.state.d.bySpell[3953], 1) -- Bronze Framework: 2 bronze bars + wool cloth
+	App.ui.crafts.view = "queue"
+	crafts.Update()
+	local q = findLists("crafts")[3]
+	local names = {}
+	for _, c in ipairs(q.data) do names[#names + 1] = c.recipe.name .. " x" .. c.count end
+	log("queue: %s", table.concat(names, ", "))
+	assert(q.data[1].recipe.name == "Smelt Bronze" and q.data[1].count == 3, "parts first: 6 bronze bars = 3 smelts")
+	App.ui.crafts.view = "shop"
+	crafts.Update()
+	local shop = findLists("crafts")[4]
+	local buys = {}
+	for _, b in ipairs(shop.data) do buys[#buys + 1] = ("%s %d (%s)"):format(ns.Data.ItemName(App.state.d, b.item), b.qty, b.kind) end
+	log("shopping: %s", table.concat(buys, ", "))
+	crafts.SendToAuctionator()
+	assert(created and created[1] == "Forever Flips" and #created[2] == 1, "Auctionator list with the wool cloth")
+	log("auctionator list: %s", created[2][1])
+	eventFrame.scripts.OnEvent(eventFrame, "AUCTION_HOUSE_SHOW")
+	runTimers()
+	App.SearchItem(2592)
+	assert(searched == "Wool Cloth", "AH search through Auctionator")
+	crafts.CraftNext()
+	assert(crafted and crafted[1] == 2659 and crafted[2] == 3, "crafts the smelting first: " .. tostring(crafted and crafted[1]))
+	eventFrame.scripts.OnEvent(eventFrame, "UNIT_SPELLCAST_SUCCEEDED", "player", "c1", 3938)
+	assert(ns.CharData().queue[3938] == 1, "a crafted Bronze Tube comes off the queue")
+	log("queue, shopping list, Auctionator, AH search, craft next: ok")
+	Auctionator, C_TradeSkillUI = nil, nil
+end
+
 App.Show("crafts")
+App.ui.crafts.view = "plan"
 -- the crafts plan: click a part to flip buy/craft
 local craftLists = findLists("crafts")
+eventFrame.scripts.OnEvent(eventFrame, "AUCTION_HOUSE_CLOSED")
+runTimers()
 if craftLists[2] and craftLists[2].rows[1] and craftLists[2].rows[1].data then
 	craftLists[2].rows[1]:Click("LeftButton")
 	log("plan after flipping a part: %s", craftLists[2].rows[1].cells[5].text)

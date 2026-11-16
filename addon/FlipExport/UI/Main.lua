@@ -46,18 +46,19 @@ function App.Compute()
 	Data.ApplyLearnData(d, char, ns.RecipeMasterData)
 	Prices.ResetCache()
 	local atr = ns.AuctionatorDB()
-	local market = Prices.Build(d, { scan = DB.ah, atr = atr, depth = ui.priceDepth, learnedVendor = DB.vendor, useTsm = ui.useTsm })
+	local tsmTime = ns.TsmDataTime and ns.TsmDataTime("AUCTIONDB_NON_COMMODITY_DATA")
+	local market = Prices.Build(d, { scan = DB.ah, atr = atr, depth = ui.priceDepth, learnedVendor = DB.vendor, useTsm = ui.useTsm, tsmTime = tsmTime })
 	local profs = Data.Professions(d, char)
 	local profSkills = {}
 	for _, p in pairs(profs) do profSkills[p.skill] = true end
 	local known = Data.KnownSpells(char)
-	local inv = {}
-	for _, list in ipairs({ ns.ReadBagCounts and ns.ReadBagCounts() or {}, (char.bank and char.bank.i) or {} }) do
-		for _, e in ipairs(list) do inv[e[1]] = (inv[e[1]] or 0) + (e[2] or 0) end
-	end
+	local inv, bags = {}, {}
+	for _, e in ipairs(ns.ReadBagCounts and ns.ReadBagCounts() or {}) do bags[e[1]] = (bags[e[1]] or 0) + (e[2] or 0) end
+	for k, v in pairs(bags) do inv[k] = v end
+	for _, e in ipairs((char.bank and char.bank.i) or {}) do inv[e[1]] = (inv[e[1]] or 0) + (e[2] or 0) end
 	App.state = {
 		d = d, char = char, profs = profs, profSkills = profSkills, known = known, market = market, atr = atr,
-		inventory = inv, faction = UnitFactionGroup and UnitFactionGroup("player") or nil,
+		inventory = inv, bags = bags, tsmTime = tsmTime, faction = UnitFactionGroup and UnitFactionGroup("player") or nil,
 		specs = Leveling.KnownSpecs(d, known),
 	}
 	return App.state
@@ -69,6 +70,12 @@ function App.Engine(craftMode, strategy, overrides)
 		cut = App.ui.cut, craftMode = craftMode or "known", known = s.known, profSkills = s.profSkills,
 		strategy = strategy or "best", overrides = overrides,
 	})
+end
+
+--- With the Auction House open, searches it for the item (Auctionator's search when installed).
+function App.SearchItem(id)
+	if not (id and id > 0 and ns.IsAuctionHouseOpen()) then return false end
+	return ns.SearchAH(Data.ItemName(App.data, id))
 end
 
 local function itemText(d, id, name)
@@ -172,7 +179,7 @@ function App.UpdateStatus()
 		parts[#parts + 1] = C.muted .. "no AH scan yet|r"
 	end
 	if s and s.atr then parts[#parts + 1] = ("Auctionator: %d newer"):format(s.market.atrCount or 0) end
-	parts[#parts + 1] = Prices.TsmAvailable() and (App.ui.useTsm and "TSM: on" or "TSM: off") or (C.muted .. "TSM: not installed|r")
+	parts[#parts + 1] = Prices.TsmAvailable() and (App.ui.useTsm and ("TSM " .. (s and s.tsmTime and W.Ago(s.tsmTime) or "on")) or "TSM: off") or (C.muted .. "TSM: not installed|r")
 	parts[#parts + 1] = ns.RecipeMasterData and ("learn levels: Recipe Master " .. (ns.RecipeMasterData.version or "")) or (C.muted .. "learn levels: estimates|r")
 	frame.status:SetText(table.concat(parts, "  ·  "))
 	frame.scanButton:SetEnabled(ns.IsAuctionHouseOpen())
@@ -242,7 +249,28 @@ end
 App.tabs.crafts = {}
 do
 	local T = App.tabs.crafts
-	local list, plan, planTitle, controls
+	local list, plan, queueList, shopList, planTitle, controls, viewButtons, queueButtons, actionButtons
+
+	--- The craft queue: { [spell] = count }, kept per character.
+	local function queue()
+		local c = App.state.char
+		c.queue = c.queue or {}
+		return c.queue
+	end
+
+	local function queuedCount()
+		local n = 0
+		for _, v in pairs(queue()) do n = n + v end
+		return n
+	end
+
+	function T.AddToQueue(r, n)
+		if not r or r.gather then return end
+		local q = queue()
+		q[r.spell] = math.max(0, (q[r.spell] or 0) + n)
+		if q[r.spell] == 0 then q[r.spell] = nil end
+		T.Update()
+	end
 
 	function T.Create(p)
 		local ui = App.ui.crafts
@@ -276,29 +304,79 @@ do
 			{ label = "Craft", width = 210, icon = function(r) return W.ItemIcon(r.e.recipe.out) end, text = function(r)
 				local rec = r.e.recipe
 				local tag = rec.gather and (C.muted .. (rec.bonus and " bonus" or " gathered") .. "|r") or ""
-				return itemText(App.state.d, rec.out, rec.gather and Data.ItemName(App.state.d, rec.out) or rec.name) .. (rec.qty > 1 and (" x" .. rec.qty) or "") .. tag
+				local q = not rec.gather and queue()[rec.spell]
+				return itemText(App.state.d, rec.out, rec.gather and Data.ItemName(App.state.d, rec.out) or rec.name) .. (rec.qty > 1 and (" x" .. rec.qty) or "") .. tag .. (q and (C.accent .. " [" .. q .. "]|r") or "")
 			end, sort = function(r) return r.e.recipe.name end },
 			{ label = "Profession", width = 85, text = function(r) return profName(App.state.d, r.e.recipe.skill) end, sort = function(r) return profName(App.state.d, r.e.recipe.skill) end },
 			{ label = "Cost", width = 80, align = "RIGHT", text = function(r) return r.e.complete and W.Money(r.e.cost, true) or (C.bad .. "missing price|r") end, sort = function(r) return r.e.complete and r.e.cost or nil end },
 			{ label = "Sells for", width = 80, align = "RIGHT", text = function(r) return W.Money(r.e.revenue, true) .. (r.e.channel == "vendor" and (C.muted .. " v|r") or "") end, sort = function(r) return r.e.revenue end, tip = "Per craft: the AH price after the 5% cut, or what a vendor pays (v) when that is more" },
 			{ label = "Profit", width = 85, align = "RIGHT", text = function(r) return r.e.complete and W.Money(r.e.profit, true) or "-" end, sort = function(r) return r.e.complete and r.e.profit or nil end },
 			{ label = "%", width = 50, align = "RIGHT", text = function(r) return r.e.complete and r.e.cost > 0 and W.Pct(r.e.margin) or "-" end, sort = function(r) return r.e.complete and r.e.cost > 0 and r.e.margin or nil end },
-			{ label = "Sold/day", width = 60, align = "RIGHT", text = function(r) return r.sales and r.sales.soldPerDay and W.Num(r.sales.soldPerDay, 1) or "-" end, sort = function(r) return r.sales and r.sales.soldPerDay end, tip = "TSM: how many sell per day per auction house in the region (TSM addon and app needed)" },
+			{ label = "Sold/day", width = 60, align = "RIGHT", text = function(r) return r.sales and r.sales.soldPerDay and W.Num(r.sales.soldPerDay, 1) or "-" end, sort = function(r) return r.sales and r.sales.soldPerDay end, tip = "TSM: how many sell per day per auction house in the region" },
 			{ label = "On AH", width = 50, align = "RIGHT", text = function(r) return r.e.ahUnit and tostring(r.e.ahQty) or "-" end, sort = function(r) return r.e.ahQty end },
 			{ label = "Can make", width = 55, align = "RIGHT", text = function(r) return r.e.recipe.gather and "-" or tostring(r.e.craftableNow) end, sort = function(r) return r.e.craftableNow end, tip = "From what is in your bags and bank (direct reagents)" },
 		}, {
 			sortBy = 5,
-			onClick = function(row) T.Select(row) end,
-			onEnter = function(f, row) W.ShowItemTooltip(f, row.e.recipe.out) end,
+			onClick = function(row, button)
+				if button == "RightButton" then
+					T.AddToQueue(row.e.recipe, IsShiftKeyDown and IsShiftKeyDown() and 5 or 1)
+				else
+					App.SearchItem(row.e.recipe.out)
+					T.Select(row)
+				end
+			end,
+			onEnter = function(f, row)
+				W.ShowItemTooltip(f, row.e.recipe.out)
+				if GameTooltip and not row.e.recipe.gather then GameTooltip:AddLine("Click: plan (and AH search when open). Right-click: queue 1, shift: 5", 0.3, 0.8, 1) GameTooltip:Show() end
+			end,
 		})
 		list:SetPoint("TOPLEFT", 0, -30)
 		list:SetPoint("RIGHT", p, "RIGHT", 0, 0)
-		list:SetHeight(300)
+		list:SetHeight(280)
 
+		-- bottom: Plan | Queue | Shopping list
+		viewButtons = {}
+		local vx = 0
+		for _, v in ipairs({ { "plan", "Plan" }, { "queue", "Queue" }, { "shop", "Shopping list" } }) do
+			local b = W.Button(p, v[2], v[1] == "shop" and 110 or 80, function() ui.view = v[1] T.Update() end)
+			b:SetPoint("TOPLEFT", list, "BOTTOMLEFT", vx, -6)
+			viewButtons[v[1]] = b
+			vx = vx + (v[1] == "shop" and 114 or 84)
+		end
 		planTitle = W.Label(p, "", "GameFontNormal")
-		planTitle:SetPoint("TOPLEFT", list, "BOTTOMLEFT", 2, -6)
-		planTitle:SetPoint("RIGHT", p, "RIGHT", 0, 0)
+		planTitle:SetPoint("TOPLEFT", list, "BOTTOMLEFT", vx + 8, -10)
+		planTitle:SetPoint("RIGHT", p, "RIGHT", -260, 0)
 		planTitle:SetJustifyH("LEFT")
+		if planTitle.SetWordWrap then planTitle:SetWordWrap(false) end
+
+		-- queue buttons for the selected recipe (plan view)
+		queueButtons = {}
+		local qx = 0
+		for _, n in ipairs({ 20, 5, 1 }) do
+			local b = W.Button(p, "Queue +" .. n, 80, function() T.AddToQueue(T.selected, n) end)
+			b:SetPoint("TOPRIGHT", list, "BOTTOMRIGHT", qx, -6)
+			queueButtons[#queueButtons + 1] = b
+			qx = qx - 84
+		end
+		-- actions for the queue and shopping views
+		actionButtons = {}
+		local clear = W.Button(p, "Clear queue", 90, function() wipe(queue()) T.Update() end)
+		clear:SetPoint("TOPRIGHT", list, "BOTTOMRIGHT", 0, -6)
+		local craft = W.Button(p, "Craft next", 90, function() T.CraftNext() end)
+		craft:SetPoint("RIGHT", clear, "LEFT", -4, 0)
+		craft:SetScript("OnEnter", function(self) W.ShowTextTooltip(self, "Craft next", "Crafts the next queued step your bags allow, parts first. Open its profession window first.") end)
+		craft:SetScript("OnLeave", W.HideTooltip)
+		local toAtr = W.Button(p, "To Auctionator", 120, function() T.SendToAuctionator() end)
+		toAtr:SetPoint("TOPRIGHT", list, "BOTTOMRIGHT", 0, -6)
+		toAtr:SetScript("OnEnter", function(self) W.ShowTextTooltip(self, "Auctionator shopping list", "Makes (or replaces) the 'Forever Flips' list in Auctionator's Shopping tab with these items and amounts.") end)
+		toAtr:SetScript("OnLeave", W.HideTooltip)
+		actionButtons.queue = { clear, craft }
+		actionButtons.shop = { toAtr }
+
+		local function bottom(l, below)
+			l:SetPoint("TOPLEFT", below, "BOTTOMLEFT", 0, -34)
+			l:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", 0, 0)
+		end
 		plan = W.List(p, {
 			{ label = "Part", width = 250, icon = function(r) return W.ItemIcon(r.item) end, text = function(r) return string.rep("   ", r.depth) .. itemText(App.state.d, r.item) end },
 			{ label = "Qty", width = 45, align = "RIGHT", text = function(r) return W.Num(r.count, r.count % 1 == 0 and 0 or 1) end },
@@ -307,14 +385,54 @@ do
 			{ label = "How", width = 90, text = function(r) return sourceText(r.source) end },
 			{ label = "Why", width = 260, text = function(r) return r.why end },
 		}, {
-			onClick = function(row) T.Flip(row) end,
+			onClick = function(row, button)
+				if button == "RightButton" or not App.SearchItem(row.item) then T.Flip(row) end
+			end,
 			onEnter = function(f, row)
 				W.ShowItemTooltip(f, row.item)
-				if GameTooltip and row.flippable then GameTooltip:AddLine("Click: " .. (row.source.kind == "craft" and "buy it instead" or "craft it instead"), 0.3, 0.8, 1) GameTooltip:Show() end
+				if GameTooltip and row.flippable then
+					GameTooltip:AddLine((ns.IsAuctionHouseOpen() and "Right-click: " or "Click: ") .. (row.source.kind == "craft" and "buy it instead" or "craft it instead"), 0.3, 0.8, 1)
+					GameTooltip:Show()
+				end
 			end,
 		})
-		plan:SetPoint("TOPLEFT", planTitle, "BOTTOMLEFT", -2, -4)
-		plan:SetPoint("BOTTOMRIGHT", p, "BOTTOMRIGHT", 0, 0)
+		bottom(plan, list)
+
+		queueList = W.List(p, {
+			{ label = "Craft", width = 250, icon = function(q) return W.ItemIcon(q.recipe.out) end, text = function(q) return itemText(App.state.d, q.recipe.out, q.recipe.name) .. (q.queued and "" or (C.muted .. "  (part)|r")) end },
+			{ label = "Profession", width = 90, text = function(q) return profName(App.state.d, q.recipe.skill) end },
+			{ label = "Queued", width = 55, align = "RIGHT", text = function(q) return q.queued and tostring(q.queued) or "-" end, tip = "What you queued; parts are worked out from it" },
+			{ label = "To craft", width = 60, align = "RIGHT", text = function(q) return tostring(q.count) end, tip = "Crafts still needed after what you have" },
+			{ label = "Can now", width = 60, align = "RIGHT", text = function(q) return tostring(math.min(q.count, ns.Queue.CraftableFrom(q.recipe, App.state.bags))) end, tip = "From what is in your bags" },
+			{ label = "Profit", width = 85, align = "RIGHT", text = function(q) return q.profit and W.Money(q.profit, true) or "-" end, tip = "For the queued amount, at today's prices" },
+		}, {
+			onClick = function(q, button)
+				if button == "RightButton" then
+					if q.queued then T.AddToQueue(q.recipe, (IsShiftKeyDown and IsShiftKeyDown()) and -q.queued or -1) end
+				else
+					App.SearchItem(q.recipe.out)
+				end
+			end,
+			onEnter = function(f, q)
+				W.ShowItemTooltip(f, q.recipe.out)
+				if GameTooltip and q.queued then GameTooltip:AddLine("Right-click: one less, shift: remove", 0.3, 0.8, 1) GameTooltip:Show() end
+			end,
+		})
+		bottom(queueList, list)
+
+		shopList = W.List(p, {
+			{ label = "Item", width = 250, icon = function(b) return W.ItemIcon(b.item) end, text = function(b) return itemText(App.state.d, b.item) end },
+			{ label = "Need", width = 55, align = "RIGHT", text = function(b) return tostring(b.need) end, sort = function(b) return b.need end },
+			{ label = "Have", width = 55, align = "RIGHT", text = function(b) return tostring(b.have) end, sort = function(b) return b.have end, tip = "Bags and bank" },
+			{ label = "Buy", width = 55, align = "RIGHT", text = function(b) return C.accent .. b.qty .. "|r" end, sort = function(b) return b.qty end },
+			{ label = "Where", width = 70, text = function(b) return b.kind == "ah" and "AH" or b.kind == "vendor" and "Vendor" or (C.bad .. "no price|r") end, sort = function(b) return b.kind end },
+			{ label = "About", width = 90, align = "RIGHT", text = function(b) return W.Money(b.cost, true) end, sort = function(b) return b.cost end, tip = "Walking the cheapest listings for that amount" },
+		}, {
+			sortBy = 6,
+			onClick = function(b) App.SearchItem(b.item) end,
+			onEnter = function(f, b) W.ShowItemTooltip(f, b.item) end,
+		})
+		bottom(shopList, list)
 	end
 
 	local function recipesFor(s, ui)
@@ -353,29 +471,108 @@ do
 	function T.Select(row)
 		T.selected = row and row.e.recipe or nil
 		list.selected = row
+		App.ui.crafts.view = "plan"
 		list:Update()
-		T.ShowPlan()
-	end
-
-	function T.ShowPlan()
-		local r = T.selected
-		if not r then
-			planTitle:SetText(C.muted .. "Click a craft to see how each part is got, and why. Click a part to buy or craft it instead.|r")
-			plan:SetData({}, "")
-			return
-		end
-		local ui = App.ui.crafts
-		local engine = App.Engine(ui.craftMode, ui.strategy, App.overrides)
-		local e = engine:Evaluate(r, App.state.inventory)
-		planTitle:SetText(("%s  —  cost %s, sells for %s, profit %s"):format(
-			itemText(App.state.d, r.out, r.gather and nil or r.name), W.Money(e.cost), W.Money(e.revenue), e.complete and W.Money(e.profit) or "-"))
-		plan:SetData(planRows(engine, e.parts, 0, 1, {}), r.gather and "Gathered: nothing to buy." or "No parts.")
+		T.ShowBottom()
 	end
 
 	function T.Flip(row)
 		if not row.flippable then return end
 		App.overrides[row.item] = row.source.kind == "craft" and "buy" or "craft"
 		T.Update()
+	end
+
+	--- The queue expanded: crafts (parts first) and the shopping list.
+	function T.Expanded()
+		local s, ui = App.state, App.ui.crafts
+		local engine = App.Engine(ui.craftMode, ui.strategy, App.overrides)
+		local entries = {}
+		for spell, n in pairs(queue()) do
+			local r = s.d.bySpell[spell]
+			if r and n > 0 then entries[#entries + 1] = { recipe = r, count = n } end
+		end
+		table.sort(entries, function(a, b) return a.recipe.name < b.recipe.name end)
+		local x = ns.Queue.Expand(engine, entries, s.inventory)
+		for _, c in ipairs(x.crafts) do
+			c.queued = queue()[c.recipe.spell]
+			if c.queued then
+				local e = engine:Evaluate(c.recipe)
+				c.profit = e.complete and e.profit * c.queued or nil
+			end
+		end
+		return x
+	end
+
+	function T.ShowBottom()
+		local ui = App.ui.crafts
+		local view = ui.view or "plan"
+		local n = queuedCount()
+		viewButtons.queue:SetText(n > 0 and ("Queue (" .. n .. ")") or "Queue")
+		for k, b in pairs(viewButtons) do if k == view then b:LockHighlight() else b:UnlockHighlight() end end
+		plan:Hide() queueList:Hide() shopList:Hide()
+		for _, b in ipairs(queueButtons) do b:Hide() end
+		for _, group in pairs(actionButtons) do for _, b in ipairs(group) do b:Hide() end end
+
+		if view == "plan" then
+			plan:Show()
+			local r = T.selected
+			if not r then
+				planTitle:SetText(C.muted .. "Click a craft to see how each part is got, and why.|r")
+				plan:SetData({}, "")
+				return
+			end
+			if not r.gather then for _, b in ipairs(queueButtons) do b:Show() end end
+			local engine = App.Engine(ui.craftMode, ui.strategy, App.overrides)
+			local e = engine:Evaluate(r, App.state.inventory)
+			planTitle:SetText(("%s: cost %s, sells %s, profit %s"):format(
+				itemText(App.state.d, r.out, r.gather and nil or r.name), W.Money(e.cost, true), W.Money(e.revenue, true), e.complete and W.Money(e.profit, true) or "-"))
+			plan:SetData(planRows(engine, e.parts, 0, 1, {}), r.gather and "Gathered: nothing to buy." or "No parts.")
+		elseif view == "queue" then
+			queueList:Show()
+			for _, b in ipairs(actionButtons.queue) do b:Show() end
+			local x = T.Expanded()
+			local profit = 0
+			for _, c in ipairs(x.crafts) do profit = profit + (c.profit or 0) end
+			local crafts = 0
+			for _, c in ipairs(x.crafts) do crafts = crafts + c.count end
+			planTitle:SetText(#x.crafts > 0 and ("%d crafts; to buy about %s; profit about %s"):format(crafts, W.Money(x.total, true), W.Money(profit, true)) or (C.muted .. "Right-click a craft above to queue it.|r"))
+			queueList:SetData(x.crafts, "The queue is empty. Right-click a craft above, or use Queue +1 in its plan.")
+		else
+			shopList:Show()
+			for _, b in ipairs(actionButtons.shop) do b:Show() end
+			local x = T.Expanded()
+			planTitle:SetText(#x.buy > 0 and (("%d items, about %s"):format(#x.buy, W.Money(x.total, true)) .. (x.missing > 0 and (C.bad .. ", " .. x.missing .. " without a price|r") or "")) or (C.muted .. "Nothing to buy.|r"))
+			shopList:SetData(x.buy, next(queue()) and "You have everything for the queue." or "Queue crafts to get a shopping list.")
+		end
+	end
+
+	function T.CraftNext()
+		local x = T.Expanded()
+		local bags = App.state.bags
+		for _, c in ipairs(x.crafts) do
+			local n = math.min(c.count, ns.Queue.CraftableFrom(c.recipe, bags))
+			if n > 0 then
+				local ok, why = ns.CraftRecipe(c.recipe.spell, n)
+				if ok then
+					ns.Say("crafting %d x %s", n, c.recipe.name)
+				else
+					ns.Say("%s: %s (%s)", c.recipe.name, why or "could not craft", profName(App.state.d, c.recipe.skill))
+				end
+				return
+			end
+		end
+		ns.Say(#x.crafts > 0 and "nothing in the queue can be made from your bags yet: see the shopping list." or "the queue is empty.")
+	end
+
+	function T.SendToAuctionator()
+		local x = T.Expanded()
+		local items = {}
+		for _, b in ipairs(x.buy) do
+			if b.kind == "ah" then items[#items + 1] = { Data.ItemName(App.state.d, b.item), b.qty } end
+		end
+		if #items == 0 then return ns.Say("nothing to buy on the AH.") end
+		local name, err = ns.AuctionatorShoppingList(items)
+		if name then ns.Say("Auctionator shopping list '%s': %d items. Open its Shopping tab at the AH.", name, #items) else ns.Say("could not make the Auctionator list: %s", err or "?") end
 	end
 
 	function T.Update()
@@ -395,7 +592,7 @@ do
 			for _, row in ipairs(rows) do if row.e.recipe == T.selected then list.selected = row end end
 		end
 		list:Update()
-		T.ShowPlan()
+		T.ShowBottom()
 	end
 end
 
@@ -433,7 +630,7 @@ do
 			{ label = "Vendor pays", width = 90, align = "RIGHT", text = function(r) return W.Money(r.vendor) end, sort = function(r) return r.vendor end },
 			{ label = "Units", width = 60, align = "RIGHT", text = function(r) return r.units .. (r.more and "+" or "") end, sort = function(r) return r.units end },
 			{ label = "Profit", width = 100, align = "RIGHT", text = function(r) return W.Money(r.profit) end, sort = function(r) return r.profit end, tip = "Buying the cheap units and selling them to a vendor" },
-		}, { sortBy = 5, onEnter = function(f, row) W.ShowItemTooltip(f, row.item) end })
+		}, { sortBy = 5, onClick = function(row) App.SearchItem(row.item) end, onEnter = function(f, row) W.ShowItemTooltip(f, row.item) end })
 		flips:SetPoint("TOPLEFT", 0, -30)
 		flips:SetPoint("BOTTOMRIGHT", 0, 0)
 
@@ -445,7 +642,7 @@ do
 			{ label = "Units", width = 50, align = "RIGHT", text = function(r) return r.units .. (r.more and "+" or "") end, sort = function(r) return r.units end },
 			{ label = "Profit", width = 90, align = "RIGHT", text = function(r) return W.Money(r.profit) end, sort = function(r) return r.profit end, tip = "Reselling them at the usual price, after the AH cut" },
 			{ label = "Sold/day", width = 60, align = "RIGHT", text = function(r) return r.soldPerDay and W.Num(r.soldPerDay, 1) or "-" end, sort = function(r) return r.soldPerDay end },
-		}, { sortBy = 6, onEnter = function(f, row) W.ShowItemTooltip(f, row.item) end })
+		}, { sortBy = 6, onClick = function(row) App.SearchItem(row.item) end, onEnter = function(f, row) W.ShowItemTooltip(f, row.item) end })
 		market:SetPoint("TOPLEFT", 0, -30)
 		market:SetPoint("BOTTOMRIGHT", 0, 0)
 	end
@@ -539,11 +736,11 @@ do
 		ups = W.List(p, {
 			{ label = "Craft", width = 220, icon = function(u) return W.ItemIcon(u.recipe.out) end, text = function(u) return itemText(App.state.d, u.recipe.out, u.recipe.name) end, sort = function(u) return u.recipe.name end },
 			{ label = "Colour", width = 80, text = function(u) return colorChance(u.color, u.chance) end, sort = function(u) return u.chance end },
-			{ label = "Net each", width = 80, align = "RIGHT", text = function(u) return W.Money(u.net, true) end, sort = function(u) return u.net end, tip = "Cost of one craft minus what the product sells for (negative: it makes money)" },
-			{ label = "Per point", width = 80, align = "RIGHT", text = function(u) return W.Money(u.perPoint, true) end, sort = function(u) return u.perPoint end },
+			{ label = "Profit each", width = 80, align = "RIGHT", text = function(u) return W.Money(-u.net, true) end, sort = function(u) return -u.net end, tip = "What the product sells for minus the cost of one craft (red: it costs you)" },
+			{ label = "Per point", width = 80, align = "RIGHT", text = function(u) return W.Money(-u.net / u.chance, true) end, sort = function(u) return -u.net / u.chance end, tip = "Profit per skill point, counting the crafts that give no point (red: what each point costs)" },
 			{ label = "Skill-ups", width = 110, text = function(u) return levels(u.recipe) end, sort = function(u) return u.recipe.grey end, tip = "Orange (always), yellow (usually), green (rarely), grey (never)" },
 			{ label = "Learn", width = 200, text = function(u) return learnTag(App.state, u.recipe) end },
-		}, { sortBy = 4, desc = false, onEnter = function(f, u) W.ShowItemTooltip(f, u.recipe.out) end })
+		}, { sortBy = 4, onClick = function(u) App.SearchItem(u.recipe.out) end, onEnter = function(f, u) W.ShowItemTooltip(f, u.recipe.out) end })
 		ups:SetPoint("TOPLEFT", upsTitle, "BOTTOMLEFT", -2, -4)
 		ups:SetPoint("RIGHT", p, "RIGHT", 0, 0)
 		ups:SetHeight(220)
@@ -554,10 +751,10 @@ do
 			{ label = "Craft", width = 220, icon = function(st) return W.ItemIcon(st.recipe.out) end, text = function(st) return itemText(App.state.d, st.recipe.out, st.recipe.name) end },
 			{ label = "Skill", width = 80, text = function(st) return st.from .. " - " .. st.to end },
 			{ label = "Crafts", width = 55, align = "RIGHT", text = function(st) return W.Num(st.crafts, 0) end },
-			{ label = "Net each", width = 80, align = "RIGHT", text = function(st) return W.Money(st.netEach, true) end },
-			{ label = "Step cost", width = 90, align = "RIGHT", text = function(st) return W.Money(st.total, true) end, tip = "Including learning it, when not known" },
+			{ label = "Profit each", width = 80, align = "RIGHT", text = function(st) return W.Money(-st.netEach, true) end },
+			{ label = "Step profit", width = 90, align = "RIGHT", text = function(st) return W.Money(-st.total, true) end, tip = "All crafts of this step, minus learning it when not known (red: what the step costs)" },
 			{ label = "Learn", width = 200, text = function(st) return learnTag(App.state, st.recipe) end },
-		}, { onEnter = function(f, st) W.ShowItemTooltip(f, st.recipe.out) end })
+		}, { onClick = function(st) App.SearchItem(st.recipe.out) end, onEnter = function(f, st) W.ShowItemTooltip(f, st.recipe.out) end })
 		path:SetPoint("TOPLEFT", pathTitle, "BOTTOMLEFT", -2, -4)
 		path:SetPoint("BOTTOMRIGHT", 0, 0)
 	end
@@ -608,9 +805,9 @@ do
 		local plan = Leveling.Plan(recipes, pr.rank, ui.target, net, learn)
 		path:SetData(plan.steps, "No path found.")
 		if plan.stuckAt then
-			summary:SetText(("%s for %d crafts; %sstuck at %d|r (no priced recipe gives a point there)"):format(W.Money(plan.total, true), math.floor(plan.crafts + 0.5), C.bad, plan.stuckAt))
+			summary:SetText(("%s %s for %d crafts; %sstuck at %d|r (no priced recipe gives a point there)"):format(plan.total <= 0 and "makes" or "costs", W.Money(math.abs(plan.total), true), math.floor(plan.crafts + 0.5), C.bad, plan.stuckAt))
 		else
-			summary:SetText(("%d to %d: %s for about %d crafts%s"):format(pr.rank, ui.target, W.Money(plan.total, true), math.floor(plan.crafts + 0.5),
+			summary:SetText(("%d to %d %s %s, about %d crafts%s"):format(pr.rank, ui.target, plan.total <= 0 and (C.good .. "makes|r") or (C.bad .. "costs|r"), W.Money(math.abs(plan.total), true), math.floor(plan.crafts + 0.5),
 				ui.target > pr.max and (C.bad .. " (above your cap " .. pr.max .. ": train the next rank)|r") or ""))
 		end
 	end
@@ -645,7 +842,7 @@ do
 			{ label = "Spent", width = 80, align = "RIGHT", text = function(e) return W.Money(e.spent, true) end, sort = function(e) return e.spent end },
 			{ label = "Crafted", width = 55, align = "RIGHT", text = function(e) return tostring(e.crafted) end, sort = function(e) return e.crafted end },
 			{ label = "Last sale", width = 80, text = function(e) return e.lastSale and W.Ago(e.lastSale) or "-" end, sort = function(e) return e.lastSale end },
-		}, { sortBy = 4, onEnter = function(f, e) if e.item ~= 0 then W.ShowItemTooltip(f, e.item) end end })
+		}, { sortBy = 4, onClick = function(e) App.SearchItem(e.item) end, onEnter = function(f, e) if e.item ~= 0 then W.ShowItemTooltip(f, e.item) end end })
 		list:SetPoint("TOPLEFT", chart, "BOTTOMLEFT", 0, -10)
 		list:SetPoint("BOTTOMRIGHT", 0, 0)
 	end
