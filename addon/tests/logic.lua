@@ -69,6 +69,29 @@ test("market: scan, newer Auctionator data, TSM for the rest", function()
 	eq(m2:Ah(2592), nil, "no TSM")
 end)
 
+test("market: exact times decide between the scan, Auctionator and TSM", function()
+	local now = time()
+	local today = tostring(math.floor((now - time({ year = 2020, month = 1, day = 1, hour = 0 })) / 86400))
+	local atr = {
+		["3858"] = { m = 900, h = { [today] = 950 } }, -- searched a minute ago (time noted)
+		["3860"] = { m = 4000, h = { [today] = 4000 } }, -- seen today, time unknown: the scan from 10 min ago wins
+		["g:4383:40"] = { m = 30000, h = { [today] = 30000 } }, -- gear key with item level
+	}
+	local scan = { t = now - 600, i = { { 3858, 1000, 20, { { 1000, 20 } } }, { 3860, 5000, 3, { { 5000, 3 } } } } }
+	TSM_API = { GetCustomPriceValue = function(src, s) return ({ DBRecent = 777, DBMinBuyout = 700 })[src] end }
+	Prices.ResetCache()
+	local m = Prices.Build(d, { scan = scan, atr = atr, atrSeen = { ["3858"] = now - 60, ["g:4383:40"] = now - 30 }, tsmTime = now - 300, depth = 1 })
+	eq(m:Ah(3858).src, "auctionator", "the search a minute ago beats TSM from 5 min ago")
+	eq(m:Ah(3858).price, 900)
+	eq(m:Ah(3860).src, "tsm", "TSM from 5 min ago beats the scan from 10 min ago")
+	eq(m:Ah(3860).price, 700, "lowest listing setting: TSM's lowest buyout")
+	eq(m:Ah(4383).price, 30000, "gear keys count (searched 30 s ago)")
+	local older = Prices.Build(d, { scan = scan, atr = atr, atrSeen = { ["3858"] = now - 60 }, tsmTime = now - 3600, depth = 1 })
+	eq(older:Ah(3860).src, "scan", "TSM from an hour ago loses to the scan")
+	TSM_API = nil
+	Prices.ResetCache()
+end)
+
 local function market(rows) return Prices.Build(d, { scan = scanOf(rows), depth = 1 }) end
 local function known(...) local s = {} for _, v in ipairs({ ... }) do s[v] = true end return s end
 

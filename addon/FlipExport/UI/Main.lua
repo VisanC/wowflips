@@ -45,9 +45,10 @@ function App.Compute()
 	char.skills = ok and skills or char.skills
 	Data.ApplyLearnData(d, char, ns.RecipeMasterData)
 	Prices.ResetCache()
+	if ns.WatchAuctionator then ns.WatchAuctionator() end
 	local atr = ns.AuctionatorDB()
 	local tsmTime = ns.TsmDataTime and ns.TsmDataTime("AUCTIONDB_NON_COMMODITY_DATA")
-	local market = Prices.Build(d, { scan = DB.ah, atr = atr, depth = ui.priceDepth, learnedVendor = DB.vendor, useTsm = ui.useTsm, tsmTime = tsmTime })
+	local market = Prices.Build(d, { scan = DB.ah, atr = atr, atrSeen = DB.atrSeen, depth = ui.priceDepth, learnedVendor = DB.vendor, useTsm = ui.useTsm, tsmTime = tsmTime })
 	local profs = Data.Professions(d, char)
 	local profSkills = {}
 	for _, p in pairs(profs) do profSkills[p.skill] = true end
@@ -219,14 +220,15 @@ function App.Toggle()
 end
 
 --- Called by the capture code when new data arrives (scan done, mail read, recipes seen):
---- one refresh half a second after the last of a burst.
-local pending = false
+--- one refresh a second after the last of a burst.
+local generation = 0
 function App.DataChanged()
-	if not (frame and frame:IsShown()) or pending then return end
-	pending = true
-	C_Timer.After(0.5, function()
-		pending = false
-		App.Refresh()
+	if not (frame and frame:IsShown()) then return end
+	generation = generation + 1
+	local mine = generation
+	-- once things settle (an Auctionator scan records thousands of prices): 1 s after the last change
+	C_Timer.After(1, function()
+		if mine == generation then App.Refresh() end
 	end)
 end
 

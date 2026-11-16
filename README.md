@@ -20,7 +20,7 @@ The addon now does the main work in game, no import needed: type `/flip` or clic
 
 TradeSkillMaster is used for its data only: Forever Flips sets TSM's own options so it stays out of sight (Blizzard's AH, mail, vendor and profession windows, no TSM tooltips, banking window, destroy pop-up or minimap icon). `/flip tsm` turns that off; then turn TSM's windows back on in its settings. When the TSM app's prices for your auction house are newer than your scan and Auctionator, they win.
 
-Prices, newest first: your own full scan (`/flip scan` or the Scan AH button, AH open), Auctionator's database when it saw an item later (its scans and searches), and TradeSkillMaster for the rest. With the TSM addon and its desktop app installed, sold per day, sale rate and market value come from TSM too.
+Prices: for each item the newest of your own full scan (`/flip scan` or the Scan AH button, AH open), Auctionator's database (its scans and every search; Auctionator keeps only the day, so Forever Flips notes the time of each price it records) and the TSM app's last download for your auction house. With the TSM addon and its desktop app installed, sold per day, sale rate and market value come from TSM too.
 
 Learn levels and skill-up levels come from your Recipe Master copy, turned into `addon/FlipExport/Data/RecipeMaster.lua` on your PC (`npx vite-node scripts/recipemaster-to-addon.ts <RecipeMaster folder> ../addon/FlipExport/Data/RecipeMaster.lua` in `web`). That file is gitignored: Recipe Master's data is for your own use. Without it, trainer recipes show estimated learn levels (~). Run it again after Recipe Master updates.
 

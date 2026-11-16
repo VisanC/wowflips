@@ -203,6 +203,13 @@ if not os.getenv("SV") then
 		MultiSearchExact = function(_, terms) searched = terms[1] end,
 	} } }
 	C_TradeSkillUI = { GetAllRecipeIDs = function() return {} end, CraftRecipe = function(spell, n) crafted = { spell, n } end }
+	-- Auctionator's database: the time of each price it records is noted
+	hooksecurefunc = function(t, name, fn) local orig = t[name] t[name] = function(...) local r = orig(...) fn(...) return r end end
+	Auctionator.Database = { db = {}, SetPrice = function(self, key, price) self.db[key] = { m = price, h = {}, l = {}, a = {} } end }
+	ns.WatchAuctionator()
+	Auctionator.Database:SetPrice("2592", 25, 10)
+	assert(ns.GetDB().atrSeen["2592"], "Auctionator's price time noted")
+	runTimers()
 	App.Refresh()
 	crafts.AddToQueue(App.state.d.bySpell[3938], 2) -- Bronze Tube: 2 bronze bars + weak flux each
 	crafts.AddToQueue(App.state.d.bySpell[3953], 1) -- Bronze Framework: 2 bronze bars + wool cloth

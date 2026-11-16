@@ -131,7 +131,7 @@ function Market:Ah(id)
 end
 
 --- @param d     game data (Data.Build)
---- @param opts  { scan = DB.ah, atr = Auctionator's price table, depth = 3, learnedVendor = DB.vendor, useTsm = true, tsmTime = when the TSM app downloaded realm prices }
+--- @param opts  { scan = DB.ah, atr = Auctionator's price table, atrSeen = { [key] = time Auctionator recorded it }, depth = 3, learnedVendor = DB.vendor, useTsm = true, tsmTime = when the TSM app downloaded realm prices }
 function Prices.Build(d, opts)
 	opts = opts or {}
 	local depth = opts.depth or 3
@@ -149,19 +149,28 @@ function Prices.Build(d, opts)
 	end
 	local atr = opts.atr
 	if type(atr) == "table" then
+		-- when Auctionator saw each price: the time Forever Flips noted (opts.atrSeen), else the
+		-- start of the last day it has (it keeps only days)
 		local base = day0()
-		local scanDay = m.scanTime > 0 and math.floor((m.scanTime - base) / 86400) or -1
-		m.atrCount = 0
+		local seen = opts.atrSeen or {}
+		local best = {}
 		for key, e in pairs(atr) do
-			local id = type(key) == "string" and key:match("^%d+$") and tonumber(key)
+			local id = type(key) == "string" and tonumber(key:match("^(%d+)$") or key:match("^g:(%d+):"))
 			if id and type(e) == "table" and type(e.m) == "number" and e.m > 0 then
 				local last, lastKey = lastDay(e)
-				local have = m.ah[id]
-				if not have or last > scanDay then
-					local qty = (lastKey and type(e.a) == "table" and e.a[lastKey]) or (have and have.qty) or 0
-					m.ah[id] = { min = e.m, qty = qty, levels = { { e.m, qty } }, price = e.m, src = "auctionator", t = base + math.max(0, last) * 86400 }
-					m.atrCount = m.atrCount + 1
-				end
+				local t = seen[key] or (last >= 0 and base + last * 86400 or 0)
+				local b = best[id]
+				if not b or t > b.t or (t == b.t and e.m < b.e.m) then best[id] = { e = e, t = t, lastKey = lastKey } end
+			end
+		end
+		m.atrCount = 0
+		for id, b in pairs(best) do
+			local have = m.ah[id]
+			if not have or b.t > (have.t or 0) then
+				local e = b.e
+				local qty = (b.lastKey and type(e.a) == "table" and e.a[b.lastKey]) or (have and have.qty) or 0
+				m.ah[id] = { min = e.m, qty = qty, levels = { { e.m, qty } }, price = e.m, src = "auctionator", t = b.t }
+				m.atrCount = m.atrCount + 1
 			end
 		end
 	end

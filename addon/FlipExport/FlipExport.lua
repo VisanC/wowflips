@@ -775,6 +775,22 @@ ns.AuctionatorShoppingList = function(items)
 	return "Forever Flips"
 end
 
+-- Auctionator keeps only the day it saw a price. To know which is newer, its scans and searches
+-- or our scan or TSM's, note the time of every price it records (saved, so it lasts).
+local watchedAtr
+local function watchAuctionator()
+	local adb = Auctionator and Auctionator.Database
+	if type(adb) ~= "table" or watchedAtr == adb or type(adb.SetPrice) ~= "function" or not hooksecurefunc then return end
+	watchedAtr = adb
+	hooksecurefunc(adb, "SetPrice", function(_, key)
+		if type(key) ~= "string" or not DB then return end
+		DB.atrSeen = DB.atrSeen or {}
+		DB.atrSeen[key] = now()
+		if ns.App then ns.App.DataChanged() end
+	end)
+end
+ns.WatchAuctionator = watchAuctionator
+
 ns.ReadBagCounts = function()
 	local counts = {}
 	for bag = 0, (NUM_BAG_SLOTS or 4) do readContainer(bag, counts) end
@@ -795,14 +811,19 @@ function handlers.ADDON_LOADED(name)
 	DB.chars = DB.chars or {}
 	DB.vendor = DB.vendor or {}
 	charKey = (UnitName("player") or "?") .. "-" .. (GetRealmName() or "?")
+	local cutoff = now() - 8 * 86400
+	for k, t in pairs(DB.atrSeen or {}) do if t < cutoff then DB.atrSeen[k] = nil end end
 	if ns.App then
 		local ok, err = pcall(ns.App.Init, DB)
 		if not ok then say("|cffff4040window failed to start:|r %s", tostring(err)) end
 	end
 end
 
+function handlers.PLAYER_LOGIN() C_Timer.After(1, watchAuctionator) end
+
 function handlers.AUCTION_HOUSE_SHOW()
 	ahOpen = true
+	watchAuctionator()
 	C_Timer.After(1, queryOwned)
 	if ns.App then ns.App.DataChanged() end
 end
