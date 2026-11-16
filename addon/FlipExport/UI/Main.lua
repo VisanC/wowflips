@@ -280,6 +280,25 @@ function App.ProfessionSpell(skill)
 	return (id and spellName(id)) or PROFESSION_SPELL_NAME[skill] or (App.data and App.data.skills[skill])
 end
 
+--- Seconds one craft of a recipe takes: its cast time (from the game) plus a moment before the
+--- next cast starts. nil when the game doesn't say.
+local CRAFT_GAP = 0.5
+local castTimes = {}
+function App.CraftSeconds(spell)
+	local v = castTimes[spell]
+	if v then return v end
+	local ms
+	if C_Spell and C_Spell.GetSpellInfo then
+		local info = C_Spell.GetSpellInfo(spell)
+		ms = info and info.castTime
+	end
+	if ms == nil and GetSpellInfo then ms = select(4, GetSpellInfo(spell)) end
+	if type(ms) ~= "number" or ms < 0 then return nil end -- not loaded yet: ask again next time
+	v = ms / 1000 + CRAFT_GAP
+	castTimes[spell] = v
+	return v
+end
+
 local craftButton
 local function inCombat() return InCombatLockdown and InCombatLockdown() end
 
@@ -494,11 +513,15 @@ do
 			viewButtons[v[1]] = b
 			vx = vx + (v[1] == "shop" and 114 or 84)
 		end
-		planTitle = W.Label(p, "", "GameFontNormal")
-		planTitle:SetPoint("TOPLEFT", list, "BOTTOMLEFT", vx + 8, -10)
+		-- two small lines beside the view buttons
+		planTitle = W.Label(p, "", "GameFontNormalSmall")
+		planTitle:SetPoint("TOPLEFT", list, "BOTTOMLEFT", vx + 8, -3)
 		planTitle:SetPoint("RIGHT", p, "RIGHT", -310, 0)
+		planTitle:SetHeight(28)
 		planTitle:SetJustifyH("LEFT")
-		if planTitle.SetWordWrap then planTitle:SetWordWrap(false) end
+		if planTitle.SetJustifyV then planTitle:SetJustifyV("MIDDLE") end
+		if planTitle.SetWordWrap then planTitle:SetWordWrap(true) end
+		if planTitle.SetMaxLines then planTitle:SetMaxLines(2) end
 
 		-- queue buttons for the selected recipe (plan view)
 		queueButtons = {}
@@ -561,6 +584,8 @@ do
 			{ label = "To craft", width = 60, align = "RIGHT", text = function(q) return tostring(q.count) end, tip = "Crafts still needed after what you have" },
 			{ label = "Can now", width = 60, align = "RIGHT", text = function(q) return tostring(math.min(q.count, ns.Queue.CraftableFrom(q.recipe, App.state.bags))) end, tip = "From what is in your bags" },
 			{ label = "Profit", width = 85, align = "RIGHT", text = function(q) return q.profit and W.Money(q.profit, true) or "-" end, tip = "For the queued amount, at today's prices" },
+			{ label = "Time", width = 65, align = "RIGHT", text = function(q) return W.Duration(q.seconds) end, tip = "Crafting this step: cast time of each craft (plus a moment between casts) x crafts to do" },
+			{ label = "Done in", width = 70, align = "RIGHT", text = function(q) return q.seconds and (W.Duration(q.doneAt) .. (q.doneAtUnsure and "+" or "")) or "-" end, tip = "From the first step to the end of this one; the last row is the whole queue" },
 		}, {
 			onClick = function(q, button)
 				if button == "RightButton" then
@@ -680,24 +705,31 @@ do
 			if not r.gather then for _, b in ipairs(queueButtons) do b:Show() end end
 			local engine = App.Engine(ui.craftMode, ui.strategy, App.overrides)
 			local e = engine:Evaluate(r, App.state.inventory)
-			planTitle:SetText(("%s: cost %s, sells %s, profit %s"):format(
+			planTitle:SetText(("%s\ncost %s · sells %s · profit %s"):format(
 				itemText(App.state.d, r.out, r.gather and nil or r.name), W.Money(e.cost, true), W.Money(e.revenue, true), e.complete and W.Money(e.profit, true) or "-"))
 			plan:SetData(planRows(engine, e.parts, 0, 1, {}), r.gather and "Gathered: nothing to buy." or "No parts.")
 		elseif view == "queue" then
 			queueList:Show()
 			for _, b in ipairs(actionButtons.queue) do b:Show() end
 			local x = T.Expanded()
-			local profit = 0
-			for _, c in ipairs(x.crafts) do profit = profit + (c.profit or 0) end
-			local crafts = 0
-			for _, c in ipairs(x.crafts) do crafts = crafts + c.count end
-			planTitle:SetText(#x.crafts > 0 and ("%d crafts; to buy about %s; profit about %s"):format(crafts, W.Money(x.total, true), W.Money(profit, true)) or (C.muted .. "Right-click a craft above to queue it.|r"))
+			local profit, crafts, total, unknown = 0, 0, 0, false
+			for _, c in ipairs(x.crafts) do
+				profit = profit + (c.profit or 0)
+				crafts = crafts + c.count
+				-- time for this step, and from the start of the queue to its end
+				local each = App.CraftSeconds(c.recipe.spell)
+				c.seconds = each and each * c.count or nil
+				if each then total = total + c.seconds else unknown = true end
+				c.doneAt = total
+				c.doneAtUnsure = unknown
+			end
+			planTitle:SetText(#x.crafts > 0 and ("%d crafts, about %s%s\nbuy about %s · profit about %s"):format(crafts, W.Duration(total), unknown and "+" or "", W.Money(x.total, true), W.Money(profit, true)) or (C.muted .. "Right-click a craft above to queue it.|r"))
 			queueList:SetData(x.crafts, "The queue is empty. Right-click a craft above, or use Queue +1 in its plan.")
 		else
 			shopList:Show()
 			for _, b in ipairs(actionButtons.shop) do b:Show() end
 			local x = T.Expanded()
-			planTitle:SetText(#x.buy > 0 and (("%d items, about %s"):format(#x.buy, W.Money(x.total, true)) .. (x.missing > 0 and (C.bad .. ", " .. x.missing .. " without a price|r") or "")) or (C.muted .. "Nothing to buy.|r"))
+			planTitle:SetText(#x.buy > 0 and (("%d items to buy\nabout %s"):format(#x.buy, W.Money(x.total, true)) .. (x.missing > 0 and (C.bad .. ", " .. x.missing .. " without a price|r") or "")) or (C.muted .. "Nothing to buy.|r"))
 			shopList:SetData(x.buy, next(queue()) and "You have everything for the queue." or "Queue crafts to get a shopping list.")
 		end
 		App.PlaceCraftButton()

@@ -31,7 +31,8 @@ function Methods:SetScript(n, fn) self.scripts[n] = fn end
 function Methods:GetScript(n) return self.scripts[n] end
 function Methods:SetText(t) self.text = t end
 function Methods:GetText() return self.text end
-function Methods:CreateFontString() return mock("FontString") end
+local fontStrings = {}
+function Methods:CreateFontString() local f = mock("FontString") fontStrings[#fontStrings + 1] = f return f end
 function Methods:CreateTexture() return mock("Texture") end
 function Methods:SetChecked(v) self.checked = v end
 function Methods:GetChecked() return self.checked end
@@ -238,8 +239,16 @@ if not os.getenv("SV") then
 	crafts.AddToQueue(App.state.d.bySpell[3938], 2) -- Bronze Tube: 2 bronze bars + weak flux each
 	crafts.AddToQueue(App.state.d.bySpell[3953], 1) -- Bronze Framework: 2 bronze bars + wool cloth
 	App.ui.crafts.view = "queue"
+	GetSpellInfo = function(id) return "spell " .. id, nil, nil, id == 2659 and 3000 or 5000 end
 	crafts.Update()
 	local q = findLists("crafts")[3]
+	-- time per step and from the start: 3 smelts x 3.5 s, then 1 x 5.5 s and 2 x 5.5 s
+	assert(q.data[1].seconds == 10.5 and q.data[#q.data].doneAt == 10.5 + 3 * 5.5, "craft times")
+	local title
+	for _, f in ipairs(fontStrings) do if type(f.text) == "string" and f.text:find("crafts, about") then title = f.text end end
+	assert(title and title:find("6 crafts, about 27 s\n", 1, true), "queue title: " .. tostring(title))
+	log("queue title: %s", (title:gsub("\n", " / ")))
+	GetSpellInfo = nil
 	local names = {}
 	for _, c in ipairs(q.data) do names[#names + 1] = c.recipe.name .. " x" .. c.count end
 	log("queue: %s", table.concat(names, ", "))

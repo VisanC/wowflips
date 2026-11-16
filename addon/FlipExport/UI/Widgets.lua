@@ -46,6 +46,15 @@ function W.Ago(t)
 	return ("%d days ago"):format(math.floor(s / 86400 + 0.5))
 end
 
+--- A duration: 40 s, 12 min, 1 h 05 min (minutes rounded up).
+function W.Duration(s)
+	if not s then return "-" end
+	if s < 59.5 then return ("%d s"):format(math.floor(s + 0.5)) end
+	local m = math.ceil(s / 60)
+	if m < 60 then return ("%d min"):format(m) end
+	return ("%d h %02d min"):format(math.floor(m / 60), m % 60)
+end
+
 W.COLOR = {
 	orange = "|cffff8040", yellow = "|cffffff00", green = "|cff40c040", grey = "|cff808080", locked = "|cffff4040",
 	muted = "|cff9a9a9a", good = "|cff4fd16b", bad = "|cffff6060", accent = "|cff4fc3f7",
