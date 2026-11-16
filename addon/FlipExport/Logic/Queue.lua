@@ -34,13 +34,61 @@ function Queue.Expand(engine, entries, inventory)
 	local craftCount, craftOrder, need, buy = {}, {}, {}, {}
 	local depthOf = {}
 
+	local function mode(item)
+		return (engine.opts.overrides and engine.opts.overrides[item]) or engine.opts.strategy or "best"
+	end
+
+	-- How many crafts of r what you have allows, making its parts from what you have too
+	-- (ore you own -> bars -> bronze bars). Counts each part on its own, so it can promise a
+	-- little more than there is when parts share materials; the rest is then bought.
+	local fromStock
+	local function canMake(item, path, level)
+		local have = math.max(0, stock[item] or 0)
+		if level > 3 or mode(item) == "buy" then return have end
+		for _, r in ipairs(engine.d.byOutput[item] or {}) do
+			if not r.gather and not path[r.spell] and engine:Allowed(r) then
+				have = have + fromStock(r, path, level + 1) * r.qty
+			end
+		end
+		return have
+	end
+	function fromStock(r, path, level)
+		local sub = {}
+		for k in pairs(path) do sub[k] = true end
+		sub[r.spell] = true
+		local n = math.huge
+		for _, rg in ipairs(r.reagents) do
+			n = math.min(n, math.floor(canMake(rg[1], sub, level) / rg[2]))
+			if n <= 0 then return 0 end
+		end
+		return n == math.huge and 0 or n
+	end
+
 	local addCraft
 	local function want(item, qty, depth)
 		need[item] = (need[item] or 0) + qty
-		local use = math.min(stock[item] or 0, qty)
+		local use = math.min(math.max(0, stock[item] or 0), qty)
 		stock[item] = (stock[item] or 0) - use
 		qty = qty - use
 		if qty <= 0 then return end
+		-- what you already have comes first: craft it from your materials (the ore you bought)
+		-- before the cheapest way from the market, which may since have changed
+		if mode(item) ~= "buy" then
+			for _, r in ipairs(engine.d.byOutput[item] or {}) do
+				if qty <= 0 then break end
+				if not r.gather and engine:Allowed(r) then
+					local n = math.min(fromStock(r, {}, 1), math.ceil(qty / r.qty - 1e-9))
+					if n > 0 then
+						stock[item] = (stock[item] or 0) + n * r.qty
+						addCraft(r, n, depth + 1)
+						local take = math.min(qty, n * r.qty)
+						stock[item] = stock[item] - take
+						qty = qty - take
+					end
+				end
+			end
+			if qty <= 0 then return end
+		end
 		local src = engine:UnitCost(item)
 		if src.kind == "craft" then
 			local r = src.recipe

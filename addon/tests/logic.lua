@@ -26,7 +26,7 @@ local d = Data.Build(ns.GameData)
 local function scanOf(rows) return { t = 1000, i = rows } end
 
 test("game data lookups", function()
-	eq(#d.recipes, 13, "recipes")
+	eq(#d.recipes, 15, "recipes")
 	eq(d.bySpell[3954].name, "Moonsight Rifle")
 	eq(d.byOutput[3860][1].spell, 10097)
 	eq(d.bySpell[2659].qty, 2, "Smelt Bronze makes 2")
@@ -241,6 +241,34 @@ test("queue: parts first, leftovers, shopping cost along the listings", function
 	eq(buy[2880].kind, "vendor", "weak flux from a vendor")
 	eq(buy[2592].qty, 1, "wool cloth")
 	eq(x.total, 2 * 10 + 3 * 20 + 2 * 100 + 30)
+end)
+
+test("queue: what you have comes first (ore you bought gets smelted)", function()
+	-- bars are cheaper on the AH than ore + smelting, so the market alone would buy bars
+	local m = market({ { 2840, 10, 99, {} }, { 3576, 12, 99, {} }, { 2770, 50, 99, {} }, { 2771, 50, 99, {} }, { 2841, 10, 99, {} }, { 2592, 30, 99, {} } })
+	local e = Engine.New(d, m, { craftMode = "known", known = known(2657, 3304, 2659, 3953) })
+	eq(e:UnitCost(2841).kind, "ah", "bronze bars: buying is cheapest")
+	-- 3 frameworks = 6 bronze bars = 3 smelts = 3 copper + 3 tin bars; you have 3 of each ore
+	local x = Queue.Expand(e, { { recipe = d.bySpell[3953], count = 3 } }, { [2770] = 3, [2771] = 3 })
+	local crafts, buy = {}, {}
+	for _, c in ipairs(x.crafts) do crafts[c.recipe.spell] = c end
+	for _, b in ipairs(x.buy) do buy[b.item] = b end
+	eq(crafts[2657] and crafts[2657].count, 3, "smelt your copper ore")
+	eq(crafts[3304] and crafts[3304].count, 3, "smelt your tin ore")
+	eq(crafts[2659] and crafts[2659].count, 3, "then bronze")
+	eq(x.crafts[1].depth, 2, "ore first")
+	eq(buy[2841], nil, "no bronze bars bought") eq(buy[2840], nil) eq(buy[2770], nil)
+	eq(buy[2592].qty, 3, "only the wool cloth")
+	-- 2 of each ore: 2 smelts from them, the rest the cheapest way (bronze bars)
+	x = Queue.Expand(e, { { recipe = d.bySpell[3953], count = 3 } }, { [2770] = 2, [2771] = 2 })
+	crafts, buy = {}, {}
+	for _, c in ipairs(x.crafts) do crafts[c.recipe.spell] = c end
+	for _, b in ipairs(x.buy) do buy[b.item] = b end
+	eq(crafts[2659].count, 2) eq(buy[2841].qty, 2, "2 bronze bars bought")
+	-- "Buy all parts" buys, whatever you have
+	e = Engine.New(d, m, { craftMode = "known", known = known(2657, 3304, 2659, 3953), strategy = "buy" })
+	x = Queue.Expand(e, { { recipe = d.bySpell[3953], count = 1 } }, { [2770] = 3, [2771] = 3 })
+	eq(#x.crafts, 1, "only the framework")
 end)
 
 test("normal scan, listing checks and Auctionator: newest wins, unit counts", function()
