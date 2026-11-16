@@ -1,0 +1,21 @@
+{
+  "name": "forever-flips-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Forever Flips data for Claude: your WoW: Forever saved data, Auctionator and TSM prices, worked out with the addon's own logic.",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "test": "node test/run.js",
+    "pack": "node scripts/pack.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.20.0",
+    "wasmoon": "^1.16.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@anthropic-ai/mcpb": "^2.1.2",
+    "esbuild": "^0.28.2"
+  }
+}

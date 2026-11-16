@@ -53,6 +53,15 @@ jobs:
       - name: Package the addon for download
         run: cd ../addon && zip -qr ../web/public/FlipExport.zip FlipExport
 
+      - name: Package the Claude extension (MCP) for download
+        run: |
+          cd ../mcp
+          npm ci --no-audit --no-fund
+          npm test
+          npm run pack
+          cp dist/forever-flips.mcpb ../web/public/
+        continue-on-error: true
+
       - run: npm test
 
       - name: Build

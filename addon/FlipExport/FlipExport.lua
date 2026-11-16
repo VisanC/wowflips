@@ -907,6 +907,15 @@ function handlers.CRAFT_UPDATE() captureCraft() professionChanged() end
 function handlers.CRAFT_CLOSE() tradeOpen = false wipe(openRecipes) professionChanged() end
 function handlers.BAG_UPDATE_DELAYED() professionChanged() end
 
+-- On logout and /reload (when the game writes the saved variables): what you carry and who you
+-- are, so tools outside the game (the Forever Flips MCP for Claude) see it too.
+function handlers.PLAYER_LOGOUT()
+	local c = charData()
+	local _, classFile = UnitClass("player")
+	c.bags = { t = now(), i = readBags() }
+	c.info = { t = now(), n = UnitName("player"), r = GetRealmName(), f = UnitFactionGroup("player"), c = classFile, l = UnitLevel("player"), g = GetMoney() }
+end
+
 function handlers.MERCHANT_SHOW() C_Timer.After(0.3, captureMerchant) end
 function handlers.TRAINER_SHOW() C_Timer.After(0.5, captureTrainer) end
 function handlers.MERCHANT_UPDATE() captureMerchant() end

@@ -1,0 +1,89 @@
+{
+  "manifest_version": "0.3",
+  "name": "forever-flips",
+  "display_name": "Forever Flips (WoW: Forever)",
+  "version": "0.1.0",
+  "description": "What to craft and flip on WoW: Forever, from your saved game data: the Forever Flips addon, Auctionator and TSM prices.",
+  "long_description": "Reads what the game saves (after a /reload): the Forever Flips addon's scans, queue, bags, bank and AH mail, Auctionator's price database and the TSM app's AuctionDB data, and works it out with the addon's own logic. Read-only. Tools: status, best_crafts, craft_plan, item, deals, leveling, queue, sales.",
+  "author": {
+    "name": "VisanC"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/VisanC/wowflips"
+  },
+  "homepage": "https://visanc.github.io/wowflips/",
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.cjs",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/server/index.cjs"
+      ],
+      "env": {
+        "WOW_DIR": "${user_config.wow_dir}",
+        "FLIPS_CHARACTER": "${user_config.character}"
+      }
+    }
+  },
+  "user_config": {
+    "wow_dir": {
+      "type": "directory",
+      "title": "WoW: Forever folder",
+      "description": "The _forever_ folder with Interface and WTF in it.",
+      "default": "C:\\Program Files (x86)\\World of Warcraft\\_forever_",
+      "required": true
+    },
+    "character": {
+      "type": "string",
+      "title": "Character (optional)",
+      "description": "Name of the character to use, e.g. Tu. Empty: the one played last.",
+      "default": "",
+      "required": false
+    }
+  },
+  "tools": [
+    {
+      "name": "status",
+      "description": "Character, professions and how fresh each data source is"
+    },
+    {
+      "name": "best_crafts",
+      "description": "Crafts ranked by profit, with sales speed and competition"
+    },
+    {
+      "name": "craft_plan",
+      "description": "One recipe in detail: parts, buy or craft, shopping list"
+    },
+    {
+      "name": "item",
+      "description": "An item's prices from every source, and its recipes"
+    },
+    {
+      "name": "deals",
+      "description": "Vendor flips and listings under the usual price"
+    },
+    {
+      "name": "leveling",
+      "description": "Cheapest way to level a profession"
+    },
+    {
+      "name": "queue",
+      "description": "The in-game craft queue, expanded"
+    },
+    {
+      "name": "sales",
+      "description": "Your auction income and best sellers"
+    }
+  ],
+  "compatibility": {
+    "platforms": [
+      "win32",
+      "darwin"
+    ],
+    "runtimes": {
+      "node": ">=18.0.0"
+    }
+  }
+}
