@@ -1,0 +1,185 @@
+-- Smoke test for the Forever Flips window: loads the whole addon in .toc order against a
+-- generic mock of WoW's frame API, opens the window and goes through every tab and control.
+-- It catches Lua errors and empty views, not layout. Run from the repo root:
+--   lua5.1 addon/tests/ui.lua                      (test fixture data)
+--   GAMEDATA=addon/FlipExport/Data/GameData.lua SV=<SavedVariables/FlipExport.lua> lua5.1 addon/tests/ui.lua
+
+local ROOT = "addon/FlipExport/"
+local chat = {}
+local function log(...) io.stderr:write(string.format(...), "\n") end
+
+-- Generic widget mock; scripts run on Show/Click/etc.
+local Methods = {}
+local function mock(kind, name)
+	local o = { kind = kind, name = name, shown = true, w = 120, h = 400, scripts = {}, text = "", min = 0, max = 0, value = 0 }
+	-- like real frames: unknown API methods (Capitalized) are no-ops, other unset fields are nil
+	return setmetatable(o, { __index = function(_, k)
+		if Methods[k] then return Methods[k] end
+		if type(k) == "string" and k:match("^%u") then return function() end end
+		return nil
+	end })
+end
+function Methods:SetSize(w, h) self.w, self.h = w, h end
+function Methods:SetWidth(w) self.w = w end
+function Methods:SetHeight(h) self.h = h if self.scripts.OnSizeChanged then self.scripts.OnSizeChanged(self) end end
+function Methods:GetWidth() return self.w end
+function Methods:GetHeight() return self.h end
+function Methods:Show() local was = self.shown self.shown = true if not was and self.scripts.OnShow then self.scripts.OnShow(self) end end
+function Methods:Hide() self.shown = false end
+function Methods:IsShown() return self.shown end
+function Methods:SetScript(n, fn) self.scripts[n] = fn end
+function Methods:GetScript(n) return self.scripts[n] end
+function Methods:SetText(t) self.text = t end
+function Methods:GetText() return self.text end
+function Methods:CreateFontString() return mock("FontString") end
+function Methods:CreateTexture() return mock("Texture") end
+function Methods:SetChecked(v) self.checked = v end
+function Methods:GetChecked() return self.checked end
+function Methods:SetMinMaxValues(a, b) self.min, self.max = a, b end
+function Methods:GetMinMaxValues() return self.min, self.max end
+function Methods:SetValue(v) self.value = v if self.scripts.OnValueChanged then self.scripts.OnValueChanged(self, v) end end
+function Methods:GetPoint() return "CENTER", nil, "CENTER", 0, 0 end
+function Methods:GetCenter() return 0, 0 end
+function Methods:GetEffectiveScale() return 1 end
+function Methods:RegisterEvent(e) local ev = rawget(self, "events") or {} self.events = ev ev[e] = true end
+function Methods:Click(button) if self.scripts.OnClick then self.scripts.OnClick(self, button or "LeftButton") end end
+
+local frames = {}
+CreateFrame = function(kind, name, parent, template)
+	local f = mock(kind, name)
+	f.parent = parent
+	if name then _G[name] = f end
+	frames[#frames + 1] = f
+	return f
+end
+UIParent, Minimap, GameTooltip = mock("Frame"), mock("Frame"), mock("GameTooltip")
+UISpecialFrames, BackdropTemplateMixin = {}, {}
+tinsert = table.insert
+wipe = function(t) for k in pairs(t) do t[k] = nil end return t end
+time, date = os.time, os.date
+GetServerTime = os.time
+local timers = {}
+C_Timer = { After = function(_, fn) timers[#timers + 1] = fn end }
+local function runTimers() while #timers > 0 do table.remove(timers, 1)() end end
+SlashCmdList = {}
+print = function(...) local t = {} for i = 1, select("#", ...) do t[#t + 1] = tostring(select(i, ...)) end chat[#chat + 1] = table.concat(t, " ") log("[chat] %s", chat[#chat]) end
+UnitName = function() return os.getenv("CHAR_NAME") or "Tudor" end
+GetRealmName = function() return os.getenv("CHAR_REALM") or "Test Realm" end
+UnitFactionGroup = function() return "Alliance" end
+UnitClass = function() return "Hunter", "HUNTER" end
+UnitLevel = function() return 36 end
+GetMoney = function() return 123456 end
+GetBuildInfo = function() return "1.60.1", "70938", "", 16001 end
+GetCursorPosition = function() return 10, 10 end
+GetNumSkillLines = function() return 0 end
+GetItemInfo = function() return nil end
+C_Container = { GetContainerNumSlots = function() return 0 end }
+
+-- the addon, in .toc order
+local ns = {}
+local toc = io.open(ROOT .. "FlipExport.toc"):read("*a")
+for line in toc:gmatch("[^\r\n]+") do
+	if not line:match("^##") and line:match("%.lua$") then
+		local path = line:gsub("\\", "/")
+		if path == "Data/GameData.lua" and not os.getenv("GAMEDATA") then path = "../tests/fixtures/GameData.lua" end
+		if path == "Data/GameData.lua" then path = os.getenv("GAMEDATA"):gsub("^" .. ROOT, "") end
+		local fn = loadfile(ROOT .. path)
+		if fn then fn("FlipExport", ns) elseif path ~= "Data/RecipeMaster.lua" then error("cannot load " .. path) end
+	end
+end
+assert(ns.App and ns.GameData, "addon did not load")
+
+if os.getenv("SV") then dofile(os.getenv("SV")) end
+local eventFrame
+for _, f in ipairs(frames) do local ev = rawget(f, "events") if ev and ev.ADDON_LOADED then eventFrame = f end end
+eventFrame.scripts.OnEvent(eventFrame, "ADDON_LOADED", "FlipExport")
+local DB = ns.GetDB()
+if not os.getenv("SV") then
+	-- a small made-up character: knows Bronze Tube and smelting, a scan, a few mails
+	local c = ns.CharData()
+	c.profs = {
+		Engineering = { n = "Engineering", r = 150, m = 225, s = { 3938, 3953, 3958 } },
+		Mining = { n = "Mining", r = 175, m = 225, s = { 2659, 3307, 10097 } },
+	}
+	c.ledger = { mail = { a = { k = "sold", n = "Bronze Tube", i = 4371, c = 2, p = 5000, f = 250, t = time() - 3600 } }, crafts = {} }
+	DB.ah = { t = time() - 600, i = {
+		{ 2840, 10, 50, { { 10, 50 } } }, { 3576, 20, 40, { { 20, 40 } } }, { 2841, 100, 30, { { 100, 30 } } },
+		{ 4371, 2600, 8, { { 2600, 8 } } }, { 4382, 4000, 3, { { 4000, 3 } } }, { 2592, 30, 99, { { 30, 99 } } },
+		{ 3860, 300, 12, { { 300, 2 }, { 350, 3 }, { 500, 7 } } }, { 3858, 250, 40, { { 250, 40 } } },
+	} }
+end
+
+-- open the window and go through everything
+local errors = 0
+for _, m in ipairs(chat) do if m:find("failed") then errors = errors + 1 end end
+SlashCmdList.FLIPEXPORT("")
+runTimers()
+local win = _G.ForeverFlipsFrame
+assert(win and win.shown, "window did not open")
+log("status: %s", win.status.text)
+
+local App = ns.App
+local function rowsOf(list) return #list.data end
+local function findLists(tab)
+	local out = {}
+	for _, f in ipairs(frames) do if rawget(f, "rows") and rawget(f, "headers") and f.parent == App.tabs[tab].panel then out[#out + 1] = f end end
+	return out
+end
+local function clickAll(tab)
+	for _, f in ipairs(frames) do
+		if f.parent == App.tabs[tab].panel and f.kind == "Button" and f.scripts.OnClick and not rawget(f, "data") then
+			for _ = 1, 3 do f.scripts.OnClick(f, "LeftButton") end
+		end
+		if f.parent == App.tabs[tab].panel and f.kind == "CheckButton" and f.scripts.OnClick then
+			f.checked = not f.checked
+			f.scripts.OnClick(f)
+			f.checked = not f.checked
+			f.scripts.OnClick(f)
+		end
+	end
+	runTimers()
+end
+
+for _, tab in ipairs({ "crafts", "deals", "leveling", "sales" }) do
+	App.Show(tab)
+	local lists = findLists(tab)
+	local counts = {}
+	for _, l in ipairs(lists) do counts[#counts + 1] = rowsOf(l) end
+	log("%s: lists %s", tab, table.concat(counts, ", "))
+	-- first rows as text
+	for _, l in ipairs(lists) do
+		for i = 1, math.min(3, #l.rows) do
+			local r = l.rows[i]
+			if r.shown and r.data then
+				local cells = {}
+				for _, c in ipairs(r.cells) do cells[#cells + 1] = (c.text or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "") end
+				log("   %s", table.concat(cells, " | "))
+			end
+		end
+	end
+	clickAll(tab)
+	-- click the first row of each list, and sort by every column
+	for _, l in ipairs(lists) do
+		if l.rows[1] and l.rows[1].data then l.rows[1]:Click("LeftButton") end
+		for _, h in ipairs(l.headers) do h:Click() h:Click() end
+		for _, r in ipairs(l.rows) do if r.shown and r.scripts.OnEnter then r.scripts.OnEnter(r) end end
+		l.scripts.OnMouseWheel(l, -1)
+	end
+	runTimers()
+end
+App.Show("crafts")
+-- the crafts plan: click a part to flip buy/craft
+local craftLists = findLists("crafts")
+if craftLists[2] and craftLists[2].rows[1] and craftLists[2].rows[1].data then
+	craftLists[2].rows[1]:Click("LeftButton")
+	log("plan after flipping a part: %s", craftLists[2].rows[1].cells[5].text)
+end
+-- new data while open
+ns.App.DataChanged()
+runTimers()
+SlashCmdList.FLIPEXPORT("")
+assert(not win.shown, "window did not close")
+
+for _, m in ipairs(chat) do if m:find("failed") or m:find("could not") then errors = errors + 1 end end
+assert(errors == 0, "errors in chat")
+log("UI_OK")

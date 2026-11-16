@@ -1,10 +1,21 @@
 ## Interface: 16001
-## Title: FlipExport
-## Notes: Exports AH prices, bags, bank, known recipes and vendor prices as one string for the Forever Flips web app.
-## Version: 0.4.2
+## Title: Forever Flips (FlipExport)
+## Notes: Crafts, deals, leveling and sales from your AH scans, Auctionator and TSM, in game (/flip). Also exports for the Forever Flips website.
+## Version: 0.5.0
 ## SavedVariables: FlipExportDB
+## OptionalDeps: Auctionator, TradeSkillMaster
 
 Libs\LibStub\LibStub.lua
 Libs\LibDeflate\LibDeflate.lua
 Core.lua
+Data\GameData.lua
+Data\RecipeMaster.lua
+Logic\Data.lua
+Logic\Prices.lua
+Logic\Engine.lua
+Logic\Leveling.lua
+Logic\Deals.lua
+Logic\Sales.lua
 FlipExport.lua
+UI\Widgets.lua
+UI\Main.lua

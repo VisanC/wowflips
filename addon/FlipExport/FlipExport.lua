@@ -1,9 +1,11 @@
 -- FlipExport / FlipExport.lua
--- Collects AH prices, bags, bank, known recipes and vendor prices, and
--- exports them as one copy-paste string for the Forever Flips web app.
+-- Collects AH prices, bags, bank, known recipes, vendor prices and your AH mail. The Forever
+-- Flips window (UI/Main.lua) works with them in game; /flip export still makes the copy-paste
+-- string for the website.
 --
--- Commands:  /flip scan    full AH scan (Auction House must be open)
---            /flip export  open the export window
+-- Commands:  /flip         open the Forever Flips window
+--            /flip scan    full AH scan (Auction House must be open)
+--            /flip export  open the export window (for the website)
 --            /flip status  what has been captured so far
 
 local ADDON, ns = ...
@@ -91,6 +93,7 @@ end
 local function storeProfession(name, rank, max, spells)
 	if not name or name == "" or name == "UNKNOWN" or #spells == 0 then return end
 	charData().profs[name] = { n = name, r = rank or 0, m = max or 0, t = now(), s = spells }
+	if ns.App then ns.App.DataChanged() end
 end
 
 local function captureTradeSkill()
@@ -180,7 +183,8 @@ end
 
 local function finishScan(agg, total)
 	DB.ah = { t = now(), n = total, i = agg:Result(3) }
-	say("scanned %d auctions, %d different items. Type |cffffff00/flip export|r to copy.", total, #DB.ah.i)
+	say("scanned %d auctions, %d different items.", total, #DB.ah.i)
+	if ns.App then ns.App.DataChanged() end
 end
 
 local function processReplicate()
@@ -690,6 +694,23 @@ local function status()
 end
 
 ---------------------------------------------------------------------------
+-- For the Forever Flips window (UI/Main.lua)
+---------------------------------------------------------------------------
+
+ns.Say = say
+ns.GetDB = function() return DB end
+ns.CharData = charData
+ns.ReadSkills = readSkills
+ns.AuctionatorDB = auctionatorDB
+ns.StartScan = function() startScan() end
+ns.IsAuctionHouseOpen = function() return ahOpen end
+ns.ReadBagCounts = function()
+	local counts = {}
+	for bag = 0, (NUM_BAG_SLOTS or 4) do readContainer(bag, counts) end
+	return Core.CountsToList(counts)
+end
+
+---------------------------------------------------------------------------
 -- Events and slash command
 ---------------------------------------------------------------------------
 
@@ -703,18 +724,22 @@ function handlers.ADDON_LOADED(name)
 	DB.chars = DB.chars or {}
 	DB.vendor = DB.vendor or {}
 	charKey = (UnitName("player") or "?") .. "-" .. (GetRealmName() or "?")
+	if ns.App then
+		local ok, err = pcall(ns.App.Init, DB)
+		if not ok then say("|cffff4040window failed to start:|r %s", tostring(err)) end
+	end
 end
 
 function handlers.AUCTION_HOUSE_SHOW()
 	ahOpen = true
-	if auctionatorDB() then
-		say("Auctionator found: its prices go into |cffffff00/flip export|r, no scan needed (use its Full Scan button for fresh prices).")
-	else
-		say("type |cffffff00/flip scan|r for a full AH scan.")
-	end
 	C_Timer.After(1, queryOwned)
+	if ns.App then ns.App.DataChanged() end
 end
-function handlers.AUCTION_HOUSE_CLOSED() ahOpen = false end
+function handlers.AUCTION_HOUSE_CLOSED()
+	ahOpen = false
+	-- Auctionator's searches while the AH was open update its prices
+	if ns.App then ns.App.DataChanged() end
+end
 function handlers.OWNED_AUCTIONS_UPDATED() captureOwned() end
 function handlers.AUCTION_HOUSE_AUCTION_CREATED() C_Timer.After(0.5, queryOwned) end
 
@@ -725,7 +750,10 @@ function handlers.MAIL_INBOX_UPDATE()
 	C_Timer.After(1, function()
 		mailPending = false
 		local ok, added = pcall(scanMail)
-		if ok and added and added > 0 then say("recorded %d auction mail%s (sales, purchases, expired).", added, added > 1 and "s" or "") end
+		if ok and added and added > 0 then
+			say("recorded %d auction mail%s (sales, purchases, expired).", added, added > 1 and "s" or "")
+			if ns.App then ns.App.DataChanged() end
+		end
 	end)
 end
 function handlers.MAIL_SHOW() handlers.MAIL_INBOX_UPDATE() end
@@ -770,8 +798,9 @@ SlashCmdList.FLIPEXPORT = function(msg)
 	if cmd == "scan" then startScan()
 	elseif cmd == "export" then export()
 	elseif cmd == "status" then status()
+	elseif cmd == "" and ns.App then ns.App.Toggle()
 	else
-		say("|cffffff00/flip scan|r (AH open), |cffffff00/flip export|r, |cffffff00/flip status|r")
+		say("|cffffff00/flip|r opens Forever Flips; |cffffff00/flip scan|r (AH open), |cffffff00/flip export|r (for the website), |cffffff00/flip status|r")
 		say("Open your bank, each profession window and your profession trainers once so they're included.")
 	end
 end
