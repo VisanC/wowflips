@@ -58,25 +58,44 @@ local function readContainer(bag, counts)
 	end
 end
 
-local function readBags()
-	local counts = {}
-	for bag = 0, (NUM_BAG_SLOTS or 4) do readContainer(bag, counts) end
-	return Core.CountsToList(counts)
+--- The bags you carry: backpack, the 4 bag slots and the reagent bag (bag 5) where there is one.
+local function playerBagIDs()
+	local ids = {}
+	local inv = Constants and Constants.InventoryConstants
+	local last = NUM_TOTAL_EQUIPPED_BAG_SLOTS or ((NUM_BAG_SLOTS or 4) + (inv and inv.NumReagentBagSlots or 0))
+	for bag = 0, last do ids[#ids + 1] = bag end
+	local reagent = Enum and Enum.BagIndex and Enum.BagIndex.ReagentBag
+	if reagent and reagent > last then ids[#ids + 1] = reagent end
+	return ids
 end
 
+local function readBagCounts()
+	local counts = {}
+	for _, bag in ipairs(playerBagIDs()) do readContainer(bag, counts) end
+	return counts
+end
+
+local function readBags()
+	return Core.CountsToList(readBagCounts())
+end
+
+--- The bank: its main slots, bank bags (after the reagent bag) and a reagent bank if any.
 local function bankBagIDs()
-	local ids, seen = {}, {}
+	local ids, seen, lastCarried = {}, {}, 0
+	for _, bag in ipairs(playerBagIDs()) do seen[bag] = true lastCarried = math.max(lastCarried, bag) end
 	local function add(id)
 		if id and not seen[id] then seen[id] = true; ids[#ids + 1] = id end
 	end
 	add(BANK_CONTAINER or -1)
-	local first = (NUM_BAG_SLOTS or 4) + 1
-	for id = first, first + (NUM_BANKBAGSLOTS or 7) - 1 do add(id) end
+	local first = lastCarried + 1
+	local inv = Constants and Constants.InventoryConstants
+	for id = first, first + ((inv and inv.NumCharacterBankSlots) or NUM_BANKBAGSLOTS or 7) - 1 do add(id) end
 	if Enum and Enum.BagIndex then
 		for name, id in pairs(Enum.BagIndex) do
-			if type(name) == "string" and name:find("Bank") and not name:find("Account") then add(id) end
+			if type(name) == "string" and name:lower():find("bank") and not name:find("Account") then add(id) end
 		end
 	end
+	if REAGENTBANK_CONTAINER then add(REAGENTBANK_CONTAINER) end
 	return ids
 end
 
@@ -806,11 +825,7 @@ local function watchAuctionator()
 end
 ns.WatchAuctionator = watchAuctionator
 
-ns.ReadBagCounts = function()
-	local counts = {}
-	for bag = 0, (NUM_BAG_SLOTS or 4) do readContainer(bag, counts) end
-	return Core.CountsToList(counts)
-end
+ns.ReadBagCounts = function() return Core.CountsToList(readBagCounts()) end
 
 ---------------------------------------------------------------------------
 -- Events and slash command

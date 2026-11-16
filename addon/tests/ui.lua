@@ -216,10 +216,12 @@ end
 -- craft queue, shopping list, Auctionator list, AH search, craft next, queue counting down
 if not os.getenv("SV") then
 	local crafts = App.tabs.crafts
-	local bagItems = { { itemID = 2840, stackCount = 10 }, { itemID = 3576, stackCount = 10 } }
+	-- copper bars in the backpack, tin bars in the reagent bag (bag 5)
+	local bagItems = { [0] = { { itemID = 2840, stackCount = 10 } }, [5] = { { itemID = 3576, stackCount = 10 } } }
+	Constants = { InventoryConstants = { NumReagentBagSlots = 1, NumCharacterBankSlots = 6 } }
 	C_Container = {
-		GetContainerNumSlots = function(bag) return bag == 0 and #bagItems or 0 end,
-		GetContainerItemInfo = function(bag, slot) return bagItems[slot] end,
+		GetContainerNumSlots = function(bag) return bagItems[bag] and #bagItems[bag] or 0 end,
+		GetContainerItemInfo = function(bag, slot) return bagItems[bag][slot] end,
 	}
 	local created, searched, crafted
 	Auctionator = { API = { v1 = {
