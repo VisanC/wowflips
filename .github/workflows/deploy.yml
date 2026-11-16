@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write # commits the addon's game data file when the game build changes
   pages: write
   id-token: write
 
@@ -35,6 +35,16 @@ jobs:
 
       - name: Download game data from wago.tools
         run: npm run data
+
+      - name: Addon game data (committed when it changes)
+        run: |
+          node scripts/build-addon-data.mjs
+          cd ..
+          git add addon/FlipExport/Data/GameData.lua
+          if ! git diff --cached --quiet; then
+            git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -q -m "Addon game data: $(sed -n 's/^D.build = \"\(.*\)\"$/\1/p' addon/FlipExport/Data/GameData.lua)"
+            git pull -q --rebase origin main && git push -q origin HEAD:main
+          fi
 
       - name: Download TradeSkillMaster sales data (optional)
         run: node scripts/fetch-tsm.mjs
