@@ -4,7 +4,7 @@
 // from the site's game data in public/data (run `npm run data` first).
 // Usage: node scripts/build-addon-data.mjs [dataDir] [outFile]
 
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -74,6 +74,7 @@ async function main() {
   const [meta, items, recipes, skills] = await Promise.all(['meta.json', 'items.json', 'recipes.json', 'skills.json'].map(json));
   const lists = await siteLists();
   const out = toLua({ meta, items, recipes, skills, ...lists });
+  await mkdir(dirname(OUT), { recursive: true });
   await writeFile(OUT, out.text);
   console.log(`addon data: ${out.recipes} recipes, ${out.items} items, build ${meta.build} -> ${OUT} (${Math.round(out.text.length / 1024)} KB)`);
 }
