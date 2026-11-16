@@ -243,10 +243,10 @@ if not os.getenv("SV") then
 	crafts.Update()
 	local q = findLists("crafts")[3]
 	-- time per step and from the start: 3 smelts x 3.5 s, then 1 x 5.5 s and 2 x 5.5 s
-	assert(q.data[1].seconds == 10.5 and q.data[#q.data].doneAt == 10.5 + 3 * 5.5, "craft times")
+	assert(q.data[1].seconds == 11 and q.data[#q.data].doneAt == 11 + 6 + 11, "craft times, whole seconds")
 	local title
 	for _, f in ipairs(fontStrings) do if type(f.text) == "string" and f.text:find("crafts, about") then title = f.text end end
-	assert(title and title:find("6 crafts, about 27 s\n", 1, true), "queue title: " .. tostring(title))
+	assert(title and title:find("6 crafts, about 28 s\n", 1, true), "queue title: " .. tostring(title))
 	log("queue title: %s", (title:gsub("\n", " / ")))
 	GetSpellInfo = nil
 	local names = {}

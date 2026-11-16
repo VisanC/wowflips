@@ -55,6 +55,15 @@ function W.Duration(s)
 	return ("%d h %02d min"):format(math.floor(m / 60), m % 60)
 end
 
+--- A duration to the second, so steps add up: 45s, 14m 05s, 1h 02m 30s.
+function W.Clock(s)
+	if not s then return "-" end
+	s = math.floor(s + 0.5)
+	if s < 60 then return s .. "s" end
+	if s < 3600 then return ("%dm %02ds"):format(math.floor(s / 60), s % 60) end
+	return ("%dh %02dm %02ds"):format(math.floor(s / 3600), math.floor(s / 60) % 60, s % 60)
+end
+
 W.COLOR = {
 	orange = "|cffff8040", yellow = "|cffffff00", green = "|cff40c040", grey = "|cff808080", locked = "|cffff4040",
 	muted = "|cff9a9a9a", good = "|cff4fd16b", bad = "|cffff6060", accent = "|cff4fc3f7",

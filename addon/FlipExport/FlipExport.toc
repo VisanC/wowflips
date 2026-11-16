@@ -1,7 +1,7 @@
 ## Interface: 16001
 ## Title: Forever Flips (FlipExport)
 ## Notes: Crafts, deals, leveling and sales from your AH scans, Auctionator and TSM, in game (/flip). Also exports for the Forever Flips website.
-## Version: 0.7.1
+## Version: 0.7.2
 ## SavedVariables: FlipExportDB
 
 Libs\LibStub\LibStub.lua

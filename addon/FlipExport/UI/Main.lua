@@ -584,8 +584,8 @@ do
 			{ label = "To craft", width = 60, align = "RIGHT", text = function(q) return tostring(q.count) end, tip = "Crafts still needed after what you have" },
 			{ label = "Can now", width = 60, align = "RIGHT", text = function(q) return tostring(math.min(q.count, ns.Queue.CraftableFrom(q.recipe, App.state.bags))) end, tip = "From what is in your bags" },
 			{ label = "Profit", width = 85, align = "RIGHT", text = function(q) return q.profit and W.Money(q.profit, true) or "-" end, tip = "For the queued amount, at today's prices" },
-			{ label = "Time", width = 65, align = "RIGHT", text = function(q) return W.Duration(q.seconds) end, tip = "Crafting this step: cast time of each craft (plus a moment between casts) x crafts to do" },
-			{ label = "Done in", width = 70, align = "RIGHT", text = function(q) return q.seconds and (W.Duration(q.doneAt) .. (q.doneAtUnsure and "+" or "")) or "-" end, tip = "From the first step to the end of this one; the last row is the whole queue" },
+			{ label = "Time", width = 65, align = "RIGHT", text = function(q) return W.Clock(q.seconds) end, tip = "Crafting this step: cast time of each craft (plus a moment between casts) x crafts to do" },
+			{ label = "Done in", width = 70, align = "RIGHT", text = function(q) return q.seconds and (W.Clock(q.doneAt) .. (q.doneAtUnsure and "+" or "")) or "-" end, tip = "From the first step to the end of this one; the last row is the whole queue" },
 		}, {
 			onClick = function(q, button)
 				if button == "RightButton" then
@@ -717,8 +717,9 @@ do
 				profit = profit + (c.profit or 0)
 				crafts = crafts + c.count
 				-- time for this step, and from the start of the queue to its end
+				-- whole seconds, so the steps add up to "Done in" exactly
 				local each = App.CraftSeconds(c.recipe.spell)
-				c.seconds = each and each * c.count or nil
+				c.seconds = each and math.floor(each * c.count + 0.5) or nil
 				if each then total = total + c.seconds else unknown = true end
 				c.doneAt = total
 				c.doneAtUnsure = unknown
