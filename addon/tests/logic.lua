@@ -271,6 +271,51 @@ test("queue: what you have comes first (ore you bought gets smelted)", function(
 	eq(#x.crafts, 1, "only the framework")
 end)
 
+test("queue plan: costs rise up the listings, how many are worth making, what to pay up to", function()
+	-- every listing known: bars 10 at 1s, 10 at 1s 50c, 50 at 3s; cores 5 at 1s 50c, 20 at 2s, 100 at 2s 60c
+	local m = market({
+		{ 3575, 100, 70, { { 100, 10 }, { 150, 10 }, { 300, 50 } }, true },
+		{ 10558, 150, 125, { { 150, 5 }, { 200, 20 }, { 260, 100 } }, true },
+	})
+	local e = Engine.New(d, m, { craftMode = "known", known = known(3961, 12584, 3307), strategy = "buy" })
+	local gyro = d.bySpell[3961]
+	-- the vendor pays 4s: craft 1-5 makes 1s 50c, 6-10 1s, 11-20 50c, 21+ loses 1s
+	local x = Queue.Plan(e, { { recipe = gyro, count = 10 } }, {})
+	eq(x.revenue, 4000)
+	eq(x.total, 10 * 100 + 5 * 150 + 5 * 200, "walks the listings")
+	eq(x.extra, 250, "250c more than at the cheapest")
+	eq(x.profit, 1250)
+	local info = x.entries[3961]
+	eq(info.best, 20, "the 21st loses money")
+	eq(info.bestBy, "price")
+	eq(info.marginal, 100, "the 10th: 4s - 1s - 2s")
+	eq(x.caps[3575], 200, "a bar is worth up to 2s with cores at 2s")
+	eq(x.caps[10558], 300)
+	local rows = {}
+	for _, b in ipairs(x.buy) do rows[b.item] = b end
+	eq(rows[10558].top, 200, "the dearest core bought") eq(rows[10558].cap, 300)
+	-- 25: past the best, the parts now cost too much
+	x = Queue.Plan(e, { { recipe = gyro, count = 25 } }, {})
+	eq(x.profit, 10000 - (1000 + 1500 + 1500) - (750 + 4000))
+	eq(x.entries[3961].best, 20)
+	eq(x.caps[10558], 100, "with bars at 3s, cores are worth only 1s")
+	-- bars you have count at their price; the rest is bought
+	x = Queue.Plan(e, { { recipe = gyro, count = 10 } }, { [3575] = 5 })
+	eq(x.ownValue, 500) eq(x.total, 500 + 1750) eq(x.profit, 1250)
+	-- more than the AH has
+	x = Queue.Plan(e, { { recipe = gyro, count = 80 } }, {})
+	eq(x.short, true)
+	-- only the cheapest listing known (the normal scan): an estimate, flagged
+	local m2 = market({ { 3575, 100, 500, {} }, { 10558, 150, 125, { { 150, 5 }, { 200, 20 }, { 260, 100 } }, true } })
+	local e2 = Engine.New(d, m2, { craftMode = "known", known = known(3961), strategy = "buy" })
+	x = Queue.Plan(e2, { { recipe = gyro, count = 10 } }, {})
+	eq(x.est, true) eq(x.total, 1000 + 1750)
+	eq(x.entries[3961].best, 125, "bars look flat at 1s, cores at 2s 60c still pay: until the cores run out")
+	eq(x.entries[3961].bestBy, "supply")
+	eq(x.entries[3961].bestEst, true)
+	eq(Queue.AhCost(m2:Ah(3575), 3), 300)
+end)
+
 test("normal scan, listing checks and Auctionator: newest wins, unit counts", function()
 	-- the normal (browse) scan knows only the cheapest price: 1 unit for sure, maybe more
 	local scan = { t = 1000, kind = "summary", i = { { 3860, 300, 12, {} }, { 2592, 5, 30, {} } } }
@@ -296,6 +341,26 @@ test("normal scan, listing checks and Auctionator: newest wins, unit counts", fu
 	m = Prices.Build(d, { scan = scan, depth = 3, useTsm = false })
 	flips = Deals.VendorFlips(d, m)
 	eq(flips[1].checked, true) eq(flips[1].units, 5)
+end)
+
+test("price history from Auctionator, plus today's scan; the median uses days without a low", function()
+	local day0 = time({ year = 2020, month = 1, day = 1, hour = 0 })
+	local today = math.floor((time() - day0) / 86400)
+	local atr = {
+		["2840"] = { m = 12, h = { [tostring(today - 2)] = 15, [tostring(today - 1)] = 14 }, l = { [tostring(today - 2)] = 11 }, a = { [tostring(today - 1)] = 300 } },
+		["g:4383:30"] = { m = 9000, h = { [tostring(today - 1)] = 9000 }, l = {} },
+	}
+	local h = Prices.History(atr, 2840)
+	eq(#h, 2) eq(h[1].low, 11) eq(h[1].high, 15) eq(h[2].low, 14, "no low saved: the low is the high") eq(h[2].qty, 300)
+	eq(h[1].t, day0 + (today - 2) * 86400)
+	h = Prices.History(atr, 2840, { min = 10, qty = 50, t = time(), src = "scan" })
+	eq(#h, 3) eq(h[3].low, 10) eq(h[3].day, today)
+	h = Prices.History(atr, 2840, { min = 13, qty = 50, t = day0 + (today - 1) * 86400 + 60, src = "scan" })
+	eq(#h, 2) eq(h[2].low, 13, "merged into its day") eq(h[2].high, 14) eq(h[2].qty, 300)
+	eq(#Prices.History(atr, 2840, { min = 1, t = time(), src = "tsm" }), 2, "TSM's price isn't a day's listing")
+	eq(Prices.History(atr, 4383)[1].low, 9000, "gear: its item-level keys")
+	eq(#Prices.History(nil, 2840), 0)
+	eq(Prices.AtrMedian(atr, 2840, 14, 2), 13, "median of 11 and 14 (14 from the high), rounded")
 end)
 
 print(("logic tests: %d passed"):format(passed))

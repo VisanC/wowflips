@@ -34,6 +34,11 @@ function Methods:GetText() return self.text end
 local fontStrings = {}
 function Methods:CreateFontString() local f = mock("FontString") fontStrings[#fontStrings + 1] = f return f end
 function Methods:CreateTexture() return mock("Texture") end
+local lineObjects = {}
+function Methods:CreateLine() local l = mock("Line") lineObjects[#lineObjects + 1] = l return l end
+function Methods:SetStartPoint(_, _, x, y) self.x1, self.y1 = x, y end
+function Methods:SetEndPoint(_, _, x, y) self.x2, self.y2 = x, y end
+function Methods:IsMouseOver() return self.mouseOver end
 function Methods:SetChecked(v) self.checked = v end
 function Methods:GetChecked() return self.checked end
 function Methods:SetMinMaxValues(a, b) self.min, self.max = a, b end
@@ -248,7 +253,7 @@ if not os.getenv("SV") then
 	assert(q.data[1].seconds == 11 and q.data[#q.data].doneAt == 11 + 6 + 11, "craft times, whole seconds")
 	local title
 	for _, f in ipairs(fontStrings) do if type(f.text) == "string" and f.text:find("crafts, about") then title = f.text end end
-	assert(title and title:find("6 crafts, about 28 s\n", 1, true), "queue title: " .. tostring(title))
+	assert(title and title:find("6 crafts, about 28 s · profit", 1, true), "queue title: " .. tostring(title))
 	log("queue title: %s", (title:gsub("\n", " / ")))
 	GetSpellInfo = nil
 	local names = {}
@@ -378,6 +383,90 @@ if not os.getenv("SV") then
 	assert(not App.state.market:Ah(3576), "tin bar gone from the AH")
 	runTimers(math.huge) -- the listing timeouts: nothing left to time out
 	log("AH scan without the 15-minute limit, listing checks: ok")
+
+	-- the queue: with the AH open, what it buys gets its listings checked, and costs walk them
+	LISTED[3576] = { { 20, 40 } } -- tin bars are back
+	ns.Scan.Listings({ 3576 })
+	fire("COMMODITY_SEARCH_RESULTS_UPDATED", 3576)
+	runTimers()
+	searches = {}
+	DB.ah.t = DB.ah.t - 700 -- 11 minutes later
+	for _, e in pairs(DB.detail) do e.t = e.t - 700 end
+	App.Show("crafts")
+	App.ui.crafts.view = "shop"
+	App.Refresh()
+	assert(ns.Scan.busy == "listings" and #searches >= 1, "the shopping list's AH items get checked")
+	n = 0
+	while ns.Scan.busy and n < 20 do
+		n = n + 1
+		local id = searches[#searches]
+		LISTED[id] = LISTED[id] or { { 40, 3 }, { 60, 5 }, { 90, 50 } }
+		fire("COMMODITY_SEARCH_RESULTS_UPDATED", id)
+	end
+	runTimers()
+	assert(not ns.Scan.busy, "checked: " .. table.concat(searches, ","))
+	App.Refresh()
+	local x = crafts.Expanded()
+	for _, b in ipairs(x.buy) do
+		if b.kind == "ah" then
+			local row = App.state.market:Ah(b.item)
+			assert(row.src == "listings" and not b.est, "walked the real listings for " .. b.item)
+			assert(b.top and b.cap, "dearest and pay-up-to for " .. b.item)
+		end
+	end
+	crafts.Update()
+	assert(not ns.Scan.busy, "not checked again right away")
+	App.ui.crafts.view = "queue"
+	crafts.Update()
+	local qrows = findLists("crafts")[3].data
+	local queuedRow
+	for _, c in ipairs(qrows) do if c.queued then queuedRow = c end end
+	assert(queuedRow and queuedRow.best ~= nil, "worth-up-to for a queued craft")
+	log("queue with walked costs: buy %d, profit %s, %s worth up to %d", x.total, tostring(x.profit), queuedRow.recipe.name, queuedRow.best)
+
+	-- price history: alt-click an item in a list, or /flip graph
+	local today = math.floor((time() - time({ year = 2020, month = 1, day = 1, hour = 0 })) / 86400)
+	Auctionator.Database.db["2592"] = { m = 26, h = { [tostring(today - 3)] = 30, [tostring(today - 1)] = 28, [tostring(today)] = 26 },
+		l = { [tostring(today - 1)] = 22 }, a = { [tostring(today - 3)] = 40, [tostring(today)] = 12 } }
+	App.ui.crafts.view = "shop"
+	App.Refresh()
+	local shopFrame = findLists("crafts")[4]
+	local woolRow
+	for _, r in ipairs(shopFrame.rows) do if r.data and r.data.item == 2592 then woolRow = r end end
+	assert(woolRow, "wool cloth in the shopping list")
+	IsAltKeyDown = function() return true end
+	searched = nil
+	woolRow.scripts.OnClick(woolRow, "LeftButton")
+	IsAltKeyDown = nil
+	local g = _G.ForeverFlipsGraph
+	assert(g and g.shown, "alt-click opens the price history")
+	assert(not searched, "and doesn't search the AH")
+	local pts = g.chart.points
+	assert(#pts == 3, "3 days of history: " .. #pts)
+	assert(pts[2].low == 22 and pts[2].high == 28, "a day's lowest and highest")
+	assert(pts[1].day == today - 3 and pts[1].qty == 40 and pts[3].qty >= 12, "oldest first, amounts")
+	assert(pts[3].low <= 26, "today includes the scan")
+	local drawn = 0
+	for _, l in ipairs(lineObjects) do if l.shown and l.x2 then drawn = drawn + 1 end end
+	assert(drawn >= 4, "lines drawn: " .. drawn)
+	assert(g.chart.xs[1] < g.chart.xs[2] and g.chart.xs[2] < g.chart.xs[3], "days left to right")
+	assert((g.chart.xs[2] - g.chart.xs[1]) > (g.chart.xs[3] - g.chart.xs[2]) * 1.5, "a missing day leaves a gap")
+	-- hover: the nearest day
+	GetCursorPosition = function() return g.chart.xs[2] + 3, 50 end
+	g.chart.plot.mouseOver = true
+	g.chart.plot.scripts.OnUpdate(g.chart.plot)
+	g.chart.plot.mouseOver = false
+	g.chart.plot.scripts.OnUpdate(g.chart.plot)
+	GetCursorPosition = nil
+	assert(g.stats.text:find("3 days: lowest", 1, true), "summary: " .. tostring(g.stats.text))
+	log("price history: %s", g.stats.text)
+	g:Hide()
+	SlashCmdList.FLIPEXPORT("graph wool cloth")
+	assert(g.shown and g.title.text:find("Wool Cloth", 1, true), "/flip graph by name")
+	g:Hide()
+	SlashCmdList.FLIPEXPORT("graph |cffffffff|Hitem:3576::::|h[Tin Bar]|h|r")
+	assert(g.shown and g.title.text:find("Tin Bar", 1, true), "/flip graph with a link")
+	log("price graphs: ok")
 	C_AuctionHouse = nil
 	Auctionator, C_TradeSkillUI = nil, nil
 end

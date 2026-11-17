@@ -935,6 +935,7 @@ SlashCmdList.FLIPEXPORT = function(msg)
 	local cmd = (msg or ""):lower():match("^%s*(%S*)")
 	if cmd == "scan" then ns.StartScan()
 	elseif cmd == "fullscan" then startScan()
+	elseif cmd == "graph" and ns.App then ns.App.GraphCommand((msg or ""):match("^%s*%S+%s*(.*)$"))
 	elseif cmd == "export" then export()
 	elseif cmd == "status" then status()
 	elseif cmd == "" and ns.App then ns.App.Toggle()
@@ -943,7 +944,7 @@ SlashCmdList.FLIPEXPORT = function(msg)
 		DB.ui.quietTsm = DB.ui.quietTsm == false
 		say(DB.ui.quietTsm and "TSM stays out of sight (its windows, tooltips and minimap icon off). Applies from the next /reload." or "TSM is left as it is from now on. Turn its windows and tooltips back on in TSM's own settings (/tsm).")
 	else
-		say("|cffffff00/flip|r opens Forever Flips; |cffffff00/flip scan|r (AH open; no limit), |cffffff00/flip fullscan|r (price levels of everything; once per 15 min), |cffffff00/flip export|r (for the website), |cffffff00/flip status|r")
+		say("|cffffff00/flip|r opens Forever Flips; |cffffff00/flip scan|r (AH open; no limit), |cffffff00/flip fullscan|r (price levels of everything; once per 15 min), |cffffff00/flip graph <item>|r (price history; or alt-click an item), |cffffff00/flip export|r (for the website), |cffffff00/flip status|r")
 		say("Open your bank, each profession window and your profession trainers once so they're included.")
 	end
 end

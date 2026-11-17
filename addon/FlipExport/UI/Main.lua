@@ -256,6 +256,122 @@ function App.DataChanged()
 end
 
 ---------------------------------------------------------------------------
+-- Price history window (alt-click an item, or /flip graph <item>)
+---------------------------------------------------------------------------
+
+local graph
+local function createGraph()
+	local f = CreateFrame("Frame", "ForeverFlipsGraph", UIParent, BackdropTemplateMixin and "BackdropTemplate" or nil)
+	f:SetSize(580, 340)
+	f:SetPoint("CENTER", 0, 60)
+	f:SetFrameStrata("DIALOG")
+	f:SetToplevel(true)
+	f:SetClampedToScreen(true)
+	f:EnableMouse(true)
+	f:SetMovable(true)
+	f:RegisterForDrag("LeftButton")
+	f:SetScript("OnDragStart", f.StartMoving)
+	f:SetScript("OnDragStop", f.StopMovingOrSizing)
+	if f.SetBackdrop then
+		f:SetBackdrop({
+			bgFile = "Interface\\Tooltips\\UI-Tooltip-Background", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+			tile = true, tileSize = 16, edgeSize = 16, insets = { left = 4, right = 4, top = 4, bottom = 4 },
+		})
+		f:SetBackdropColor(0.06, 0.06, 0.08, 0.97)
+		f:SetBackdropBorderColor(0.45, 0.45, 0.5, 1)
+	end
+	tinsert(UISpecialFrames, "ForeverFlipsGraph")
+	f.icon = f:CreateTexture(nil, "ARTWORK")
+	f.icon:SetSize(22, 22)
+	f.icon:SetPoint("TOPLEFT", 14, -12)
+	f.title = W.Label(f, "", "GameFontNormal")
+	f.title:SetPoint("LEFT", f.icon, "RIGHT", 8, 0)
+	f.title:SetPoint("RIGHT", f, "TOPRIGHT", -36, -23)
+	f.title:SetJustifyH("LEFT")
+	local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+	close:SetPoint("TOPRIGHT", -4, -4)
+	f.chart = W.LineChart(f)
+	f.chart:SetPoint("TOPLEFT", 8, -42)
+	f.chart:SetPoint("BOTTOMRIGHT", -10, 50)
+	f.empty = W.Label(f, "", "GameFontDisable")
+	f.empty:SetPoint("CENTER", f.chart, "CENTER", 30, 0)
+	f.stats = W.Label(f, "", "GameFontHighlightSmall")
+	f.stats:SetPoint("BOTTOMLEFT", 16, 12)
+	f.stats:SetPoint("BOTTOMRIGHT", -16, 12)
+	f.stats:SetJustifyH("LEFT")
+	if f.stats.SetWordWrap then f.stats:SetWordWrap(true) end
+	f:Hide()
+	return f
+end
+
+--- Shows an item's price history: each day's lowest and highest cheapest price and the most
+--- seen for sale (Auctionator's database, plus today's scan), with TSM's market value, the
+--- region's average sale and the vendor price as reference lines.
+function App.ShowGraph(id)
+	if not id or id <= 0 then return end
+	if not App.state then App.Compute() end
+	graph = graph or createGraph()
+	local s = App.state
+	local row = s.market:Ah(id)
+	local hist = Prices.History(s.atr, id, row)
+	local sales = Prices.Sales(id)
+	local vendor = Data.ItemSell(s.d, id)
+	local C2 = W.CHART
+	local refs = {}
+	if sales and sales.market then refs[#refs + 1] = { sales.market, C2.ref1, "TSM market" } end
+	if sales and sales.avgSale then refs[#refs + 1] = { sales.avgSale, C2.ref2, "Region sale avg" } end
+	if vendor and vendor > 0 then refs[#refs + 1] = { vendor, C2.neutral, "Vendor pays" } end
+	graph.icon:SetTexture(W.ItemIcon(id))
+	graph.title:SetText(itemText(s.d, id))
+	graph:Show()
+	graph:Raise()
+	graph.chart:SetData(hist, refs)
+	graph.empty:SetText(#hist == 0 and "No price history yet: Auctionator records it as the AH is scanned." or "")
+
+	local lines = {}
+	if #hist > 0 then
+		local lows = {}
+		for _, p in ipairs(hist) do lows[#lows + 1] = p.low end
+		table.sort(lows)
+		local med = lows[math.floor((#lows + 1) / 2)]
+		lines[#lines + 1] = ("%d days: lowest %s, median %s, highest %s"):format(#hist, W.Money(lows[1], true), W.Money(med, true), W.Money(lows[#lows], true))
+	end
+	if row then
+		lines[#lines + 1] = ("Now %s, %s listed (%s, %s)"):format(W.Money(row.min, true), row.qty and row.qty > 0 and tostring(row.qty) or "?",
+			row.src == "tsm" and "TSM" or row.src == "auctionator" and "Auctionator" or row.src == "listings" and "searched" or "scan", W.Ago(row.t))
+	end
+	if sales and sales.soldPerDay then
+		lines[#lines + 1] = ("Region: %s sold a day, %s of listings sell"):format(W.Num(sales.soldPerDay, sales.soldPerDay < 10 and 1 or 0), sales.saleRate and (math.floor(sales.saleRate * 100 + 0.5) .. "%") or "?")
+	end
+	graph.stats:SetText(table.concat(lines, "   ·   "))
+end
+
+W.OnItemAltClick = function(id) App.ShowGraph(id) end
+
+--- /flip graph <name or id>
+function App.GraphCommand(q)
+	if not App.state then App.Compute() end
+	q = (q or ""):gsub("^%s+", ""):gsub("%s+$", "")
+	local id = tonumber(q) or tonumber(q:match("item:(%d+)") or "")
+	if not id and q ~= "" then
+		local want, hits = q:lower(), {}
+		for iid in pairs(App.state.d.items) do
+			local name = Data.ItemName(App.state.d, iid)
+			if name then
+				if name:lower() == want then id = iid break end
+				if name:lower():find(want, 1, true) then hits[#hits + 1] = iid end
+			end
+		end
+		if not id and #hits > 0 then
+			table.sort(hits, function(a, b) return #Data.ItemName(App.state.d, a) < #Data.ItemName(App.state.d, b) end)
+			id = hits[1]
+		end
+	end
+	if not id then return ns.Say("/flip graph <item name, id or link>") end
+	App.ShowGraph(id)
+end
+
+---------------------------------------------------------------------------
 -- Craft button
 ---------------------------------------------------------------------------
 -- A click crafts all of the queue's next step at once; when its profession window isn't open,
@@ -578,12 +694,17 @@ do
 		bottom(plan, list)
 
 		queueList = W.List(p, {
-			{ label = "Craft", width = 250, icon = function(q) return W.ItemIcon(q.recipe.out) end, text = function(q) return itemText(App.state.d, q.recipe.out, q.recipe.name) .. (q.queued and "" or (C.muted .. "  (part)|r")) end },
+			{ label = "Craft", width = 210, icon = function(q) return W.ItemIcon(q.recipe.out) end, text = function(q) return itemText(App.state.d, q.recipe.out, q.recipe.name) .. (q.queued and "" or (C.muted .. "  (part)|r")) end },
 			{ label = "Profession", width = 90, text = function(q) return profName(App.state.d, q.recipe.skill) end },
 			{ label = "Queued", width = 55, align = "RIGHT", text = function(q) return q.queued and tostring(q.queued) or "-" end, tip = "What you queued; parts are worked out from it" },
 			{ label = "To craft", width = 60, align = "RIGHT", text = function(q) return tostring(q.count) end, tip = "Crafts still needed after what you have" },
 			{ label = "Can now", width = 60, align = "RIGHT", text = function(q) return tostring(math.min(q.count, ns.Queue.CraftableFrom(q.recipe, App.state.bags))) end, tip = "From what is in your bags" },
-			{ label = "Profit", width = 85, align = "RIGHT", text = function(q) return q.profit and W.Money(q.profit, true) or "-" end, tip = "For the queued amount, at today's prices" },
+			{ label = "Profit", width = 80, align = "RIGHT", text = function(q) return q.profit and W.Money(q.profit, true) or "-" end, tip = "For the queued amount: what it sells for, minus the parts as you buy up the listings (cheapest first) and what you already have at its price" },
+			{ label = "Worth up to", width = 75, align = "RIGHT", text = function(q)
+				if not q.best then return "-" end
+				local col = q.best >= (q.queued or 0) and C.good or C.bad
+				return col .. q.best .. ((q.bestEst or q.bestBy == "supply") and "+" or "") .. "|r"
+			end, tip = "How many are worth making: past this, the parts for one more cost more than it brings, as the cheap listings run out. +: only the cheapest listings are known (with the AH open they get checked), or the AH runs out first" },
 			{ label = "Time", width = 65, align = "RIGHT", text = function(q) return W.Clock(q.seconds) end, tip = "Crafting this step: cast time of each craft (plus a moment between casts) x crafts to do" },
 			{ label = "Done in", width = 70, align = "RIGHT", text = function(q) return q.seconds and (W.Clock(q.doneAt) .. (q.doneAtUnsure and "+" or "")) or "-" end, tip = "From the first step to the end of this one; the last row is the whole queue" },
 		}, {
@@ -607,7 +728,18 @@ do
 			{ label = "Have", width = 55, align = "RIGHT", text = function(b) return tostring(b.have) end, sort = function(b) return b.have end, tip = "Bags and bank" },
 			{ label = "Buy", width = 55, align = "RIGHT", text = function(b) return C.accent .. b.qty .. "|r" end, sort = function(b) return b.qty end },
 			{ label = "Where", width = 70, text = function(b) return b.kind == "ah" and "AH" or b.kind == "vendor" and "Vendor" or (C.bad .. "no price|r") end, sort = function(b) return b.kind end },
-			{ label = "About", width = 90, align = "RIGHT", text = function(b) return W.Money(b.cost, true) end, sort = function(b) return b.cost end, tip = "Walking the cheapest listings for that amount" },
+			{ label = "About", width = 85, align = "RIGHT", text = function(b) return W.Money(b.cost, true) .. (b.est and "+" or "") end, sort = function(b) return b.cost end, tip = "Buying that many, cheapest listings first. +: only the cheapest listings are known, so it may cost more (with the AH open they get checked)" },
+			{ label = "Dearest", width = 75, align = "RIGHT", text = function(b)
+				if not b.top then return "-" end
+				local t = W.Money(b.top) .. (b.est and "+" or "")
+				if (b.short or 0) > 0 then t = t .. C.bad .. " !|r" end
+				return t
+			end, sort = function(b) return b.top end, tip = "What the last one you buy costs, walking up the listings. !: not enough on the AH" },
+			{ label = "Pay up to", width = 80, align = "RIGHT", text = function(b)
+				if not b.cap then return "-" end
+				if b.cap <= 0 then return C.bad .. "loss|r" end
+				return W.MoneyIn(b.cap, (b.top and b.top > b.cap) and C.bad or C.good)
+			end, sort = function(b) return b.cap end, tip = "The most one is worth paying: past it the queue's last craft loses money (the other parts at their dearest). Red: you'd be paying more than that" },
 		}, {
 			sortBy = 6,
 			onClick = function(b) App.SearchItem(b.item) end,
@@ -673,15 +805,34 @@ do
 			if r and n > 0 then entries[#entries + 1] = { recipe = r, count = n } end
 		end
 		table.sort(entries, function(a, b) return a.recipe.name < b.recipe.name end)
-		local x = ns.Queue.Expand(engine, entries, s.inventory)
+		local x = ns.Queue.Plan(engine, entries, s.inventory)
 		for _, c in ipairs(x.crafts) do
 			c.queued = queue()[c.recipe.spell]
-			if c.queued then
-				local e = engine:Evaluate(c.recipe)
-				c.profit = e.complete and e.profit * c.queued or nil
+			local info = c.queued and x.entries[c.recipe.spell]
+			if info then
+				c.profit, c.best, c.bestEst, c.bestBy, c.marginal = info.profit, info.best, info.bestEst, info.bestBy, info.marginal
 			end
 		end
 		return x
+	end
+
+	--- With the AH open: search the listings of what the queue buys (not checked in the last
+	--- 10 minutes), so the costs walk the real listings and the "worth up to" numbers are real.
+	local lastAuto = 0
+	function T.AutoCheck(x)
+		if not ns.IsAuctionHouseOpen() or not ns.Scan or ns.Scan.busy then return end
+		local now = ns.Now()
+		if now - lastAuto < 30 then return end
+		local ids = {}
+		for _, b in ipairs(x.buy) do
+			if b.kind == "ah" and #ids < 40 then
+				local row = App.state.market:Ah(b.item)
+				local fresh = row and (row.src == "listings" or row.complete) and now - (row.t or 0) < 600
+				if not fresh then ids[#ids + 1] = b.item end
+			end
+		end
+		if #ids == 0 then return end
+		if ns.Scan.Listings(ids, nil, function(n) ns.Say("checked the AH listings of %d things the queue buys.", n) end) then lastAuto = now end
 	end
 
 	function T.ShowBottom()
@@ -712,9 +863,8 @@ do
 			queueList:Show()
 			for _, b in ipairs(actionButtons.queue) do b:Show() end
 			local x = T.Expanded()
-			local profit, crafts, total, unknown = 0, 0, 0, false
+			local crafts, total, unknown = 0, 0, false
 			for _, c in ipairs(x.crafts) do
-				profit = profit + (c.profit or 0)
 				crafts = crafts + c.count
 				-- time for this step, and from the start of the queue to its end
 				-- whole seconds, so the steps add up to "Done in" exactly
@@ -724,14 +874,23 @@ do
 				c.doneAt = total
 				c.doneAtUnsure = unknown
 			end
-			planTitle:SetText(#x.crafts > 0 and ("%d crafts, about %s%s\nbuy about %s · profit about %s"):format(crafts, W.Duration(total), unknown and "+" or "", W.Money(x.total, true), W.Money(profit, true)) or (C.muted .. "Right-click a craft above to queue it.|r"))
+			local est = x.est and "+" or ""
+			planTitle:SetText(#x.crafts > 0 and ("%d crafts, about %s%s · profit %s%s\nbuy %s%s%s · sells %s"):format(
+				crafts, W.Duration(total), unknown and "+" or "", x.profit and W.Money(x.profit, true) or "-", (x.est and x.profit) and "?" or "",
+				W.Money(x.total, true), est, x.extra > 0 and (" (" .. W.Money(x.extra, true) .. " rise)") or "", W.Money(x.revenue, true))
+				or (C.muted .. "Right-click a craft above to queue it.|r"))
 			queueList:SetData(x.crafts, "The queue is empty. Right-click a craft above, or use Queue +1 in its plan.")
+			T.AutoCheck(x)
 		else
 			shopList:Show()
 			for _, b in ipairs(actionButtons.shop) do b:Show() end
 			local x = T.Expanded()
-			planTitle:SetText(#x.buy > 0 and (("%d items to buy\nabout %s"):format(#x.buy, W.Money(x.total, true)) .. (x.missing > 0 and (C.bad .. ", " .. x.missing .. " without a price|r") or "")) or (C.muted .. "Nothing to buy.|r"))
+			planTitle:SetText(#x.buy > 0 and (("%d items to buy%s\nabout %s%s%s"):format(#x.buy,
+				x.short and (C.bad .. " (not enough on the AH)|r") or "",
+				W.Money(x.total, true), x.est and "+" or "", x.extra > 0 and (", " .. W.Money(x.extra, true) .. " of it as prices rise") or "")
+				.. (x.missing > 0 and (C.bad .. ", " .. x.missing .. " without a price|r") or "")) or (C.muted .. "Nothing to buy.|r"))
 			shopList:SetData(x.buy, next(queue()) and "You have everything for the queue." or "Queue crafts to get a shopping list.")
+			T.AutoCheck(x)
 		end
 		App.PlaceCraftButton()
 	end

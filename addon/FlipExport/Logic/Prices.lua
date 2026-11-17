@@ -88,14 +88,61 @@ function Prices.AtrMedian(atr, id, days, need)
 	if type(e) ~= "table" or type(e.l) ~= "table" then return nil end
 	local today = math.floor((time() - day0()) / 86400)
 	local list = {}
-	for k, v in pairs(e.l) do
+	-- Auctionator keeps a day's lowest price in l only when it differs from the highest (h)
+	for k, high in pairs(type(e.h) == "table" and e.h or e.l) do
 		local d = tonumber(k)
+		local v = e.l[k] or high
 		if d and d > today - days and type(v) == "number" and v > 0 then list[#list + 1] = v end
 	end
 	if #list < (need or 5) then return nil end
 	table.sort(list)
 	local n = #list
 	return n % 2 == 1 and list[(n + 1) / 2] or math.floor((list[n / 2] + list[n / 2 + 1]) / 2 + 0.5)
+end
+
+--- Price history, oldest day first: { { day, t = time at the start of that day, low, high, qty } }.
+--- From Auctionator's database (each day's lowest and highest cheapest price, and the most seen
+--- for sale; it keeps 21 days by default), plus today from the addon's own scan when that is newer.
+function Prices.History(atr, id, row)
+	local out, byDay = {}, {}
+	local e = type(atr) == "table" and atr[tostring(id)] or nil
+	if type(e) ~= "table" and type(atr) == "table" then
+		-- gear is kept per item level: the variant seen most days
+		local prefix, best = "g:" .. id .. ":", -1
+		for k, v in pairs(atr) do
+			if type(k) == "string" and k:sub(1, #prefix) == prefix and type(v) == "table" and type(v.h) == "table" then
+				local n = 0
+				for _ in pairs(v.h) do n = n + 1 end
+				if n > best then e, best = v, n end
+			end
+		end
+	end
+	local base = day0()
+	if type(e) == "table" and type(e.h) == "table" then
+		for k, high in pairs(e.h) do
+			local d = tonumber(k)
+			if d and type(high) == "number" and high > 0 then
+				local low = type(e.l) == "table" and e.l[k]
+				local qty = type(e.a) == "table" and e.a[k]
+				local p = { day = d, t = base + d * 86400, low = type(low) == "number" and low or high, high = high, qty = type(qty) == "number" and qty or nil }
+				out[#out + 1] = p
+				byDay[d] = p
+			end
+		end
+	end
+	-- today's scan
+	if row and row.min and row.min > 0 and row.t and row.src ~= "tsm" then
+		local d = math.floor((row.t - base) / 86400)
+		local p = byDay[d]
+		if p then
+			p.low, p.high = math.min(p.low, row.min), math.max(p.high, row.min)
+			if row.qty and row.qty > 0 then p.qty = math.max(p.qty or 0, row.qty) end
+		else
+			out[#out + 1] = { day = d, t = base + d * 86400, low = row.min, high = row.min, qty = row.qty }
+		end
+	end
+	table.sort(out, function(a, b) return a.day < b.day end)
+	return out
 end
 
 ---------------------------------------------------------------------------
