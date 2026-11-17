@@ -2,7 +2,7 @@
 local _, ns = ...
 local D = { items = {}, recipes = {}, skills = {}, vendorReagents = {}, gather = {} }
 ns.GameData = D
-D.build = "1.60.1.70938"
+D.build = "1.60.1.70959"
 local I, R = D.items, D.recipes
 D.skills[40] = "Poisons"
 D.skills[129] = "First Aid"
