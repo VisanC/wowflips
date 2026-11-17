@@ -163,6 +163,35 @@ function W.Cycle(parent, prefix, width, choices, get, set, tooltip)
 	return b
 end
 
+--- A search box: onChange(text) a moment after typing stops; a grey hint while empty.
+function W.SearchBox(parent, width, hint, onChange)
+	local box = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
+	box:SetSize(width, 20)
+	box:SetAutoFocus(false)
+	if box.SetMaxLetters then box:SetMaxLetters(60) end
+	local ph = box:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+	ph:SetPoint("LEFT", box, "LEFT", 4, 0)
+	ph:SetText(hint or "Search")
+	box.placeholder = ph
+	local gen = 0
+	box:SetScript("OnTextChanged", function(self)
+		local text = self:GetText() or ""
+		if text == "" then ph:Show() else ph:Hide() end
+		gen = gen + 1
+		local mine = gen
+		if C_Timer then
+			C_Timer.After(0.25, function() if mine == gen then onChange(text) end end)
+		else
+			onChange(text)
+		end
+	end)
+	box:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+	box:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+	box:SetScript("OnEditFocusGained", function() ph:Hide() end)
+	box:SetScript("OnEditFocusLost", function(self) if (self:GetText() or "") == "" then ph:Show() end end)
+	return box
+end
+
 function W.Check(parent, text, get, set, tooltip)
 	local cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
 	cb:SetSize(22, 22)

@@ -15,6 +15,7 @@ local DEFAULTS = {
 	tab = "crafts", priceDepth = 3, useTsm = true, cut = 0.05,
 	crafts = { prof = "mine", scope = "known", craftMode = "known", strategy = "best", profitable = true, hideGathered = false },
 	deals = { mode = "vendor", maxPct = 0.7, minProfit = 10000 },
+	items = { scope = "all", view = "craft", recent = {} },
 	lvl = { prof = nil, target = nil, pool = "trainer" },
 	minimap = { angle = 200, hide = false },
 }
@@ -142,7 +143,7 @@ local function createWindow()
 	-- tabs
 	local x = 160
 	f.tabButtons = {}
-	for _, t in ipairs({ { "crafts", "Crafts" }, { "deals", "Deals" }, { "leveling", "Leveling" }, { "sales", "Sales" } }) do
+	for _, t in ipairs({ { "crafts", "Crafts" }, { "deals", "Deals" }, { "leveling", "Leveling" }, { "sales", "Sales" }, { "items", "Items" } }) do
 		local b = W.Button(f, t[2], 90, function() App.Show(t[1]) end)
 		b:SetPoint("TOPLEFT", f, "TOPLEFT", x, -12)
 		f.tabButtons[t[1]] = b
@@ -286,10 +287,17 @@ local function createGraph()
 	f.icon:SetPoint("TOPLEFT", 14, -12)
 	f.title = W.Label(f, "", "GameFontNormal")
 	f.title:SetPoint("LEFT", f.icon, "RIGHT", 8, 0)
-	f.title:SetPoint("RIGHT", f, "TOPRIGHT", -36, -23)
 	f.title:SetJustifyH("LEFT")
 	local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
 	close:SetPoint("TOPRIGHT", -4, -4)
+	local more = W.Button(f, "Details", 70, function()
+		if f.item then App.ShowItem(f.item) end
+		f:Hide()
+	end)
+	more:SetPoint("RIGHT", close, "LEFT", -2, 0)
+	more:SetScript("OnEnter", function(self) W.ShowTextTooltip(self, "Details", "Open it in the Items tab: prices, how it's made, what uses it.") end)
+	more:SetScript("OnLeave", W.HideTooltip)
+	f.title:SetPoint("RIGHT", more, "LEFT", -6, 0)
 	f.chart = W.LineChart(f)
 	f.chart:SetPoint("TOPLEFT", 8, -42)
 	f.chart:SetPoint("BOTTOMRIGHT", -10, 50)
@@ -311,6 +319,20 @@ function App.ShowGraph(id)
 	if not id or id <= 0 then return end
 	if not App.state then App.Compute() end
 	graph = graph or createGraph()
+	local g = App.GraphData(id)
+	graph.item = id
+	graph.icon:SetTexture(W.ItemIcon(id))
+	graph.title:SetText(itemText(App.state.d, id))
+	graph:Show()
+	graph:Raise()
+	graph.chart:SetData(g.hist, g.refs)
+	graph.empty:SetText(#g.hist == 0 and "No price history yet: Auctionator records it as the AH is scanned." or "")
+	graph.stats:SetText(table.concat(g.lines, "   ·   "))
+end
+
+--- What an item's graph and summary show: hist, refs (reference lines), lines (summary text),
+--- plus row (AH now), sales (TSM), vendor (what a vendor pays).
+function App.GraphData(id)
 	local s = App.state
 	local row = s.market:Ah(id)
 	local hist = Prices.History(s.atr, id, row)
@@ -321,13 +343,6 @@ function App.ShowGraph(id)
 	if sales and sales.market then refs[#refs + 1] = { sales.market, C2.ref1, "TSM market" } end
 	if sales and sales.avgSale then refs[#refs + 1] = { sales.avgSale, C2.ref2, "Region sale avg" } end
 	if vendor and vendor > 0 then refs[#refs + 1] = { vendor, C2.neutral, "Vendor pays" } end
-	graph.icon:SetTexture(W.ItemIcon(id))
-	graph.title:SetText(itemText(s.d, id))
-	graph:Show()
-	graph:Raise()
-	graph.chart:SetData(hist, refs)
-	graph.empty:SetText(#hist == 0 and "No price history yet: Auctionator records it as the AH is scanned." or "")
-
 	local lines = {}
 	if #hist > 0 then
 		local lows = {}
@@ -343,7 +358,7 @@ function App.ShowGraph(id)
 	if sales and sales.soldPerDay then
 		lines[#lines + 1] = ("Region: %s sold a day, %s of listings sell"):format(W.Num(sales.soldPerDay, sales.soldPerDay < 10 and 1 or 0), sales.saleRate and (math.floor(sales.saleRate * 100 + 0.5) .. "%") or "?")
 	end
-	graph.stats:SetText(table.concat(lines, "   ·   "))
+	return { hist = hist, refs = refs, lines = lines, row = row, sales = sales, vendor = vendor }
 end
 
 W.OnItemAltClick = function(id) App.ShowGraph(id) end
@@ -780,6 +795,8 @@ do
 		end
 		return out
 	end
+
+	T.PlanRows = planRows
 
 	function T.Select(row)
 		T.selected = row and row.e.recipe or nil
@@ -1221,6 +1238,317 @@ do
 				ui.target > pr.max and (C.bad .. " (above your cap " .. pr.max .. ": train the next rank)|r") or ""))
 		end
 	end
+end
+
+---------------------------------------------------------------------------
+-- Items: search any item; its price history, how it's made, what uses it
+---------------------------------------------------------------------------
+
+App.tabs.items = {}
+do
+	local T = App.tabs.items
+	local box, scopeBtn, results, header, icon, info, chart, empty, recipeBtn, craftList, usedList, viewBtn, searchBtn, q1, q5, sub
+	local index, indexState
+
+	--- Every item with a name: the game data's, plus items seen on the AH whose name the client has.
+	local function buildIndex()
+		local s = App.state
+		index, indexState = {}, s
+		local seen = {}
+		for id in pairs(s.d.items) do
+			local name = Data.ItemName(s.d, id)
+			if name then index[#index + 1] = { id = id, name = name, lower = name:lower() } seen[id] = true end
+		end
+		local cached = C_Item and C_Item.IsItemDataCachedByID
+		for id in pairs(s.market.ah) do
+			if not seen[id] and cached and C_Item.IsItemDataCachedByID(id) then
+				local name = C_Item.GetItemNameByID and C_Item.GetItemNameByID(id)
+				if name then index[#index + 1] = { id = id, name = name, lower = name:lower() } end
+			end
+		end
+	end
+
+	local function makesMine(id)
+		local s = App.state
+		for _, r in ipairs(s.d.byOutput[id] or {}) do
+			if not r.gather and (s.known[r.spell] or s.profSkills[r.skill]) then return true end
+		end
+		return false
+	end
+
+	--- Items matching every word typed, best first: exact name, starts with it, a word starts with
+	--- it, anywhere; then the ones on the AH.
+	function T.Search(text)
+		if not App.state then return {} end
+		if indexState ~= App.state then buildIndex() end
+		local words = {}
+		for w in (text or ""):lower():gmatch("%S+") do words[#words + 1] = w end
+		local scope = App.ui.items.scope
+		local out = {}
+		if #words == 0 then return out end
+		local whole = table.concat(words, " ")
+		for _, e in ipairs(index) do
+			local ok = true
+			for _, w in ipairs(words) do
+				if not e.lower:find(w, 1, true) then ok = false break end
+			end
+			if ok and scope == "ah" then ok = App.state.market:Ah(e.id) ~= nil end
+			if ok and scope == "mine" then ok = makesMine(e.id) end
+			if ok then
+				local rank = e.lower == whole and 0 or e.lower:sub(1, #whole) == whole and 1
+					or (e.lower:find(" " .. words[1], 1, true) and 2) or 3
+				out[#out + 1] = { item = e.id, name = e.name, rank = rank, ah = App.state.market:Ah(e.id) ~= nil }
+			end
+		end
+		table.sort(out, function(a, b)
+			if a.rank ~= b.rank then return a.rank < b.rank end
+			if a.ah ~= b.ah then return a.ah end
+			if #a.name ~= #b.name then return #a.name < #b.name end
+			return a.name < b.name
+		end)
+		while #out > 200 do out[#out] = nil end
+		return out
+	end
+
+	local function recentRows()
+		local out = {}
+		for _, id in ipairs(App.ui.items.recent) do out[#out + 1] = { item = id, name = Data.ItemName(App.state.d, id) or ("item " .. id) } end
+		return out
+	end
+
+	function T.Create(p)
+		box = W.SearchBox(p, 220, "Search items...", function() T.Update() end)
+		box:SetPoint("TOPLEFT", 6, -2)
+		scopeBtn = W.Cycle(p, "", 112, function() return { { "all", "All items" }, { "ah", "On the AH" }, { "mine", "I can make" } } end,
+			function() return App.ui.items.scope end, function(v) App.ui.items.scope = v T.Update() end, "Which items")
+		scopeBtn:SetPoint("LEFT", box, "RIGHT", 6, 0)
+		results = W.List(p, {
+			{ label = "Item", width = 196, icon = function(r) return W.ItemIcon(r.item) end, text = function(r) return itemText(App.state.d, r.item) end },
+			{ label = "AH", width = 72, align = "RIGHT", text = function(r) local a = App.state.market:Ah(r.item) return a and W.Money(a.price, true) or "-" end,
+				sort = function(r) local a = App.state.market:Ah(r.item) return a and a.price end },
+			{ label = "Sold/day", width = 52, align = "RIGHT", text = function(r) local sl = Prices.Sales(r.item) return sl and sl.soldPerDay and W.Num(sl.soldPerDay, sl.soldPerDay < 10 and 1 or 0) or "-" end,
+				sort = function(r) local sl = Prices.Sales(r.item) return sl and sl.soldPerDay end, tip = "Sold per day in the region (TSM)" },
+		}, {
+			onClick = function(r, button)
+				if button == "RightButton" then App.SearchItem(r.item) else T.SelectItem(r.item) end
+			end,
+			onEnter = function(f, r) W.ShowItemTooltip(f, r.item) end,
+		})
+		results:SetPoint("TOPLEFT", 0, -28)
+		results:SetPoint("BOTTOMLEFT", 0, 0)
+		results:SetWidth(346)
+
+		-- the item
+		local right = CreateFrame("Frame", nil, p)
+		right:SetPoint("TOPLEFT", 356, 0)
+		right:SetPoint("BOTTOMRIGHT", 0, 0)
+		icon = right:CreateTexture(nil, "ARTWORK")
+		icon:SetSize(24, 24)
+		icon:SetPoint("TOPLEFT", 2, -2)
+		header = W.Label(right, "", "GameFontNormalLarge")
+		header:SetPoint("LEFT", icon, "RIGHT", 6, 0)
+		header:SetPoint("RIGHT", right, "TOPRIGHT", -170, -14)
+		header:SetJustifyH("LEFT")
+		if header.SetWordWrap then header:SetWordWrap(false) end
+		searchBtn = W.Button(right, "Search AH", 80, function() if T.item then App.SearchItem(T.item) end end)
+		searchBtn:SetPoint("TOPRIGHT", 0, -2)
+		chart = W.LineChart(right)
+		chart:SetPoint("TOPLEFT", 0, -30)
+		chart:SetPoint("TOPRIGHT", 0, -30)
+		chart:SetHeight(190)
+		empty = W.Label(right, "", "GameFontDisable")
+		empty:SetPoint("CENTER", chart, "CENTER", 30, 0)
+		info = W.Label(right, "", "GameFontHighlightSmall")
+		info:SetPoint("TOPLEFT", chart, "BOTTOMLEFT", 4, -4)
+		info:SetPoint("RIGHT", right, "RIGHT", -4, 0)
+		info:SetJustifyH("LEFT")
+		if info.SetWordWrap then info:SetWordWrap(true) end
+		info:SetHeight(42)
+
+		-- how it's made / what uses it
+		viewBtn = W.Cycle(right, "", 110, function() return { { "craft", "How it's made" }, { "used", "What uses it" } } end,
+			function() return App.ui.items.view end, function(v) App.ui.items.view = v T.ShowItem() end, "Show")
+		viewBtn:SetPoint("TOPLEFT", info, "BOTTOMLEFT", -4, -2)
+		recipeBtn = W.Button(right, "", 190, function(_, button)
+			local list = T.recipes or {}
+			if #list > 1 then
+				T.recipeIdx = (button == "RightButton") and ((T.recipeIdx - 2) % #list + 1) or (T.recipeIdx % #list + 1)
+				T.ShowItem()
+			end
+		end)
+		recipeBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+		recipeBtn:SetPoint("LEFT", viewBtn, "RIGHT", 4, 0)
+		recipeBtn:SetScript("OnEnter", function(self) W.ShowTextTooltip(self, "Recipe", "When more than one makes it: click for the next, right-click for the previous.") end)
+		recipeBtn:SetScript("OnLeave", W.HideTooltip)
+		q1 = W.Button(right, "Queue +1", 70, function() if T.recipe then App.tabs.crafts.AddToQueue(T.recipe, 1) T.ShowItem() end end)
+		q5 = W.Button(right, "+5", 34, function() if T.recipe then App.tabs.crafts.AddToQueue(T.recipe, 5) T.ShowItem() end end)
+		q5:SetPoint("TOPRIGHT", info, "BOTTOMRIGHT", 4, -2)
+		q1:SetPoint("RIGHT", q5, "LEFT", -2, 0)
+		sub = W.Label(right, "", "GameFontHighlightSmall")
+		sub:SetPoint("TOPLEFT", viewBtn, "BOTTOMLEFT", 4, -4)
+		sub:SetPoint("RIGHT", right, "RIGHT", -4, 0)
+		sub:SetJustifyH("LEFT")
+		if sub.SetWordWrap then sub:SetWordWrap(false) end
+
+		craftList = W.List(right, {
+			{ label = "Part", width = 200, icon = function(r) return W.ItemIcon(r.item) end, text = function(r) return string.rep("   ", r.depth) .. itemText(App.state.d, r.item) end },
+			{ label = "Qty", width = 40, align = "RIGHT", text = function(r) return W.Num(r.count, r.count % 1 == 0 and 0 or 1) end },
+			{ label = "Each", width = 72, align = "RIGHT", text = function(r) return W.Money(r.source.unit, true) end },
+			{ label = "Total", width = 72, align = "RIGHT", text = function(r) return W.Money(r.source.unit * r.count, true) end },
+			{ label = "How", width = 80, text = function(r) return sourceText(r.source) end },
+		}, {
+			onClick = function(r) T.SelectItem(r.item) end,
+			onEnter = function(f, r)
+				W.ShowItemTooltip(f, r.item)
+				if GameTooltip then
+					if r.why and r.why ~= "" then GameTooltip:AddLine(r.why, 0.8, 0.8, 0.8) end
+					GameTooltip:AddLine("Click: open this item", 0.3, 0.8, 1)
+					GameTooltip:Show()
+				end
+			end,
+		})
+		usedList = W.List(right, {
+			{ label = "Used in", width = 200, icon = function(u) return W.ItemIcon(u.recipe.out) end, text = function(u) return itemText(App.state.d, u.recipe.out, u.recipe.name) end, sort = function(u) return u.recipe.name end },
+			{ label = "Needs", width = 45, align = "RIGHT", text = function(u) return tostring(u.needs) end, sort = function(u) return u.needs end },
+			{ label = "Profession", width = 90, text = function(u) return profName(App.state.d, u.recipe.skill) end, sort = function(u) return profName(App.state.d, u.recipe.skill) end },
+			{ label = "Profit", width = 72, align = "RIGHT", text = function(u) return u.profit and W.Money(u.profit, true) or "-" end, sort = function(u) return u.profit end, tip = "Per craft, at today's prices" },
+			{ label = "Known", width = 45, text = function(u) return u.known and (C.good .. "yes|r") or (C.muted .. "no|r") end, sort = function(u) return u.known and 1 or 0 end },
+		}, {
+			sortBy = 4,
+			onClick = function(u) T.SelectItem(u.recipe.out) end,
+			onEnter = function(f, u)
+				W.ShowItemTooltip(f, u.recipe.out)
+				if GameTooltip then GameTooltip:AddLine("Click: open this item", 0.3, 0.8, 1) GameTooltip:Show() end
+			end,
+		})
+		for _, l in ipairs({ craftList, usedList }) do
+			l:SetPoint("TOPLEFT", sub, "BOTTOMLEFT", -4, -4)
+			l:SetPoint("BOTTOMRIGHT", right, "BOTTOMRIGHT", 0, 0)
+		end
+		T.right = right
+		T.box, T.lists = box, { results = results, craft = craftList, used = usedList }
+	end
+
+	--- Opens an item (and remembers it in the recent list).
+	function T.SelectItem(id)
+		if not id then return end
+		T.item = id
+		T.recipeIdx, T.fresh = 1, true
+		local recent = App.ui.items.recent
+		for i = #recent, 1, -1 do if recent[i] == id then table.remove(recent, i) end end
+		table.insert(recent, 1, id)
+		while #recent > 20 do recent[#recent] = nil end
+		results.selected = nil
+		for _, r in ipairs(results.data or {}) do if r.item == id then results.selected = r end end
+		results:Update()
+		T.ShowItem()
+	end
+
+	function T.ShowItem()
+		local s, id = App.state, T.item
+		T.right:SetShown(id ~= nil)
+		if not id then return end
+		icon:SetTexture(W.ItemIcon(id))
+		header:SetText(itemText(s.d, id))
+		local g = App.GraphData(id)
+		chart:SetData(g.hist, g.refs)
+		empty:SetText(#g.hist == 0 and "No price history yet: Auctionator records it as the AH is scanned." or "")
+		local lines = g.lines
+		local extra = {}
+		local med = Prices.AtrMedian(s.atr, id, 14, 3)
+		if med then extra[#extra + 1] = "Auctionator 2-week median " .. W.Money(med, true) end
+		if g.sales and g.sales.market then extra[#extra + 1] = "TSM market " .. W.Money(g.sales.market, true) end
+		if g.sales and g.sales.avgSale then extra[#extra + 1] = "region sale avg " .. W.Money(g.sales.avgSale, true) end
+		local buyV = s.market.vendor[id]
+		if buyV then extra[#extra + 1] = "vendors sell it for " .. W.Money(buyV, true) end
+		if g.vendor and g.vendor > 0 then extra[#extra + 1] = "vendors pay " .. W.Money(g.vendor, true) end
+		extra[#extra + 1] = ("you have %d (%d in bags)"):format(s.inventory[id] or 0, s.bags[id] or 0)
+		info:SetText(table.concat(lines, "  ·  ") .. "\n" .. table.concat(extra, "  ·  "))
+
+		-- recipes that make it: known first, then cheapest
+		local engine = App.Engine(App.ui.crafts.craftMode, App.ui.crafts.strategy, App.overrides)
+		T.recipes = {}
+		for _, r in ipairs(s.d.byOutput[id] or {}) do
+			if not r.gather then T.recipes[#T.recipes + 1] = { r = r, e = engine:Evaluate(r, s.inventory) } end
+		end
+		table.sort(T.recipes, function(a, b)
+			local ka, kb = s.known[a.r.spell] and 1 or 0, s.known[b.r.spell] and 1 or 0
+			if ka ~= kb then return ka > kb end
+			if (a.e.cost or math.huge) ~= (b.e.cost or math.huge) then return (a.e.cost or math.huge) < (b.e.cost or math.huge) end
+			return a.r.spell < b.r.spell
+		end)
+		if T.recipeIdx > #T.recipes then T.recipeIdx = 1 end
+		-- a newly opened item nothing makes: show what uses it
+		if T.fresh and #T.recipes == 0 then App.ui.items.view = "used" end
+		T.fresh = nil
+		viewBtn:Refresh()
+		local view = App.ui.items.view
+		craftList:Hide() usedList:Hide() recipeBtn:Hide() q1:Hide() q5:Hide()
+		T.recipe = nil
+		if view == "craft" then
+			craftList:Show()
+			local pick = T.recipes[T.recipeIdx]
+			if not pick then
+				sub:SetText(C.muted .. "Nothing makes it: it's gathered, dropped or sold by vendors.|r")
+				craftList:SetData({}, "")
+				return
+			end
+			local r, e = pick.r, pick.e
+			T.recipe = r
+			recipeBtn:SetText((#T.recipes > 1 and (T.recipeIdx .. "/" .. #T.recipes .. " ") or "") .. r.name)
+			recipeBtn:Show()
+			local known = s.known[r.spell]
+			if known then q1:Show() q5:Show() end
+			local learn = ""
+			if not known then
+				local lc = Leveling.LearnCost(r, s.market)
+				learn = C.muted .. ("  · not known: learn at %d%s"):format(Data.LearnLevel(r) or 0, lc and lc.text and (", " .. lc.text) or "") .. "|r"
+			end
+			sub:SetText(("%s · cost %s · sells %s · profit %s%s"):format(profName(s.d, r.skill), W.Money(e.cost, true), W.Money(e.revenue, true),
+				e.complete and W.Money(e.profit, true) or "-", learn))
+			craftList:SetData(App.tabs.crafts.PlanRows(engine, e.parts, 0, 1, {}), "No parts.")
+		else
+			usedList:Show()
+			local rows = {}
+			for _, r in ipairs(s.d.recipes) do
+				for _, rg in ipairs(r.reagents) do
+					if rg[1] == id and s.d.items[r.out] then
+						local e = engine:Evaluate(r)
+						rows[#rows + 1] = { recipe = r, needs = rg[2], known = s.known[r.spell] or false, profit = e.complete and e.profit or nil }
+						break
+					end
+				end
+			end
+			sub:SetText(#rows > 0 and (("%d recipes use it"):format(#rows)) or (C.muted .. "No recipe uses it.|r"))
+			usedList:SetData(rows, "")
+		end
+	end
+
+	function T.Update()
+		if not App.state then return end
+		scopeBtn:Refresh()
+		local text = box:GetText() or ""
+		local rows
+		if text:gsub("%s", "") == "" then
+			rows = recentRows()
+			results:SetData(rows, "Type a name above. Items you open show up here.")
+		else
+			rows = T.Search(text)
+			results:SetData(rows, "No item matches.")
+		end
+		results.selected = nil
+		for _, r in ipairs(rows) do if r.item == T.item then results.selected = r end end
+		results:Update()
+		T.ShowItem()
+	end
+end
+
+--- Opens an item in the Items tab.
+function App.ShowItem(id)
+	if not frame then frame = createWindow() end
+	App.ui.tab = "items"
+	if not frame:IsShown() then frame:Show() else App.Show("items") end
+	App.tabs.items.SelectItem(id)
 end
 
 ---------------------------------------------------------------------------

@@ -191,7 +191,7 @@ local function clickAll(tab)
 	runTimers()
 end
 
-for _, tab in ipairs({ "crafts", "deals", "leveling", "sales" }) do
+for _, tab in ipairs({ "crafts", "deals", "leveling", "sales", "items" }) do
 	App.Show(tab)
 	local lists = findLists(tab)
 	local counts = {}
@@ -215,6 +215,21 @@ for _, tab in ipairs({ "crafts", "deals", "leveling", "sales" }) do
 		for _, h in ipairs(l.headers) do h:Click() h:Click() end
 		for _, r in ipairs(l.rows) do if r.shown and r.scripts.OnEnter then r.scripts.OnEnter(r) end end
 		l.scripts.OnMouseWheel(l, -1)
+	end
+	runTimers()
+end
+-- with real saved data: the Items tab on a few real items
+if os.getenv("SV") then
+	local items = App.tabs.items
+	App.Show("items")
+	for _, q in ipairs({ "iron ore", "gyro", "gold power", "moonsight", "linen" }) do
+		local res = items.Search(q)
+		log("items '%s': %d found, first %s", q, #res, res[1] and res[1].name or "-")
+		if res[1] then
+			items.SelectItem(res[1].item)
+			App.ui.items.view = "craft" items.ShowItem()
+			App.ui.items.view = "used" items.ShowItem()
+		end
 	end
 	runTimers()
 end
@@ -467,6 +482,61 @@ if not os.getenv("SV") then
 	SlashCmdList.FLIPEXPORT("graph |cffffffff|Hitem:3576::::|h[Tin Bar]|h|r")
 	assert(g.shown and g.title.text:find("Tin Bar", 1, true), "/flip graph with a link")
 	log("price graphs: ok")
+
+	-- Items tab: search any item by name; its price history, how it's made, what uses it
+	local items = App.tabs.items
+	App.Show("items")
+	local function typeIn(text)
+		items.box:SetText(text)
+		items.box.scripts.OnTextChanged(items.box, true)
+		runTimers()
+	end
+	typeIn("bronze")
+	local res = items.lists.results.data
+	assert(#res >= 4, "bronze items found: " .. #res)
+	local resNames = {}
+	for _, r in ipairs(res) do resNames[#resNames + 1] = r.name end
+	log("search 'bronze': %s", table.concat(resNames, ", "))
+	assert(res[1].name:find("^Bronze"), "names starting with it first")
+	typeIn("bar tin")
+	assert(#items.lists.results.data == 1 and items.lists.results.data[1].item == 3576, "every word must match")
+	typeIn("bronze bar")
+	assert(items.lists.results.data[1].item == 2841, "exact name first")
+	-- open Bronze Bar: how it's made
+	items.lists.results.rows[1].scripts.OnClick(items.lists.results.rows[1], "LeftButton")
+	assert(items.item == 2841 and items.recipe and items.recipe.name == "Smelt Bronze", "made by Smelt Bronze")
+	local partNames = {}
+	for _, r in ipairs(items.lists.craft.data) do partNames[#partNames + 1] = ns.Data.ItemName(App.state.d, r.item) end
+	assert(#partNames >= 2, "its parts: " .. table.concat(partNames, ", "))
+	log("Bronze Bar parts: %s", table.concat(partNames, ", "))
+	-- what uses it
+	App.ui.items.view = "used"
+	items.ShowItem()
+	local uses = {}
+	for _, u in ipairs(items.lists.used.data) do uses[u.recipe.name] = true end
+	assert(uses["Bronze Tube"] and uses["Bronze Framework"] and uses["Whirring Bronze Gizmo"], "recipes that use bronze bars")
+	-- a part opens itself
+	App.ui.items.view = "craft"
+	items.ShowItem()
+	items.lists.craft.rows[1].scripts.OnClick(items.lists.craft.rows[1], "LeftButton")
+	assert(items.item ~= 2841, "clicking a part opens it")
+	-- wool cloth: nothing makes it, so it shows what uses it; and its price history
+	items.SelectItem(2592)
+	assert(App.ui.items.view == "used", "nothing makes wool: what uses it")
+	-- the graph window's Details opens the Items tab
+	App.Show("crafts")
+	App.ShowGraph(3576)
+	App.ShowItem(_G.ForeverFlipsGraph.item)
+	assert(App.ui.tab == "items" and items.item == 3576, "Details: the Items tab")
+	-- empty box: the items opened lately
+	typeIn("")
+	assert(items.lists.results.data[1].item == 3576 and #items.lists.results.data >= 3, "recent items")
+	App.ui.items.scope = "mine"
+	typeIn("bar")
+	for _, r in ipairs(items.lists.results.data) do assert(App.state.d.byOutput[r.item], "only what I can make: " .. r.name) end
+	App.ui.items.scope = "all"
+	clickAll("items")
+	log("items tab: ok")
 	C_AuctionHouse = nil
 	Auctionator, C_TradeSkillUI = nil, nil
 end
