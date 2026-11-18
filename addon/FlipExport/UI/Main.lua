@@ -1310,6 +1310,41 @@ do
 		return out
 	end
 
+	--- What making one costs from materials: { unit, recipe, other = true when only a recipe you
+	--- can't use under the Crafts settings makes it }, or false. Cached until the data changes.
+	local mats, matsState, engMine, engAll
+	function T.Mats(id)
+		local s = App.state
+		if matsState ~= s then
+			mats, matsState = {}, s
+			engMine = App.Engine(App.ui.crafts.craftMode, App.ui.crafts.strategy, App.overrides)
+			engAll = App.Engine("all", App.ui.crafts.strategy, App.overrides)
+		end
+		local v = mats[id]
+		if v == nil then
+			local c = engMine:CraftSource(id)
+			v = false
+			if c and c.unit < math.huge then
+				v = { unit = c.unit, recipe = c.recipe }
+			else
+				c = engAll:CraftSource(id)
+				if c and c.unit < math.huge then v = { unit = c.unit, recipe = c.recipe, other = true } end
+			end
+			mats[id] = v
+		end
+		return v or nil
+	end
+
+	local function matsText(id)
+		local m = T.Mats(id)
+		if not m then return "-" end
+		local a = App.state.market:Ah(id)
+		local t = W.Money(m.unit, true)
+		if m.other then return W.MoneyIn(m.unit, C.muted) .. C.muted .. "*|r" end
+		if a and m.unit < a.price then return W.MoneyIn(m.unit, C.good) end
+		return t
+	end
+
 	local function recentRows()
 		local out = {}
 		for _, id in ipairs(App.ui.items.recent) do out[#out + 1] = { item = id, name = Data.ItemName(App.state.d, id) or ("item " .. id) } end
@@ -1323,10 +1358,13 @@ do
 			function() return App.ui.items.scope end, function(v) App.ui.items.scope = v T.Update() end, "Which items")
 		scopeBtn:SetPoint("LEFT", box, "RIGHT", 6, 0)
 		results = W.List(p, {
-			{ label = "Item", width = 196, icon = function(r) return W.ItemIcon(r.item) end, text = function(r) return itemText(App.state.d, r.item) end },
-			{ label = "AH", width = 72, align = "RIGHT", text = function(r) local a = App.state.market:Ah(r.item) return a and W.Money(a.price, true) or "-" end,
+			{ label = "Item", width = 168, icon = function(r) return W.ItemIcon(r.item) end, text = function(r) return itemText(App.state.d, r.item) end },
+			{ label = "AH", width = 64, align = "RIGHT", text = function(r) local a = App.state.market:Ah(r.item) return a and W.Money(a.price, true) or "-" end,
 				sort = function(r) local a = App.state.market:Ah(r.item) return a and a.price end },
-			{ label = "Sold/day", width = 52, align = "RIGHT", text = function(r) local sl = Prices.Sales(r.item) return sl and sl.soldPerDay and W.Num(sl.soldPerDay, sl.soldPerDay < 10 and 1 or 0) or "-" end,
+			{ label = "Mats", width = 64, align = "RIGHT", text = function(r) return matsText(r.item) end,
+				sort = function(r) local m = T.Mats(r.item) return m and m.unit end,
+				tip = "Making one from its materials (the cheapest recipe, parts bought or crafted as in the Crafts tab). Green: cheaper than buying it. Grey *: only with a recipe you don't know" },
+			{ label = "Sold/day", width = 50, align = "RIGHT", text = function(r) local sl = Prices.Sales(r.item) return sl and sl.soldPerDay and W.Num(sl.soldPerDay, sl.soldPerDay < 10 and 1 or 0) or "-" end,
 				sort = function(r) local sl = Prices.Sales(r.item) return sl and sl.soldPerDay end, tip = "Sold per day in the region (TSM)" },
 		}, {
 			onClick = function(r, button)
@@ -1336,11 +1374,11 @@ do
 		})
 		results:SetPoint("TOPLEFT", 0, -28)
 		results:SetPoint("BOTTOMLEFT", 0, 0)
-		results:SetWidth(346)
+		results:SetWidth(394)
 
 		-- the item
 		local right = CreateFrame("Frame", nil, p)
-		right:SetPoint("TOPLEFT", 356, 0)
+		right:SetPoint("TOPLEFT", 402, 0)
 		right:SetPoint("BOTTOMRIGHT", 0, 0)
 		icon = right:CreateTexture(nil, "ARTWORK")
 		icon:SetSize(24, 24)
@@ -1358,12 +1396,20 @@ do
 		chart:SetHeight(190)
 		empty = W.Label(right, "", "GameFontDisable")
 		empty:SetPoint("CENTER", chart, "CENTER", 30, 0)
-		info = W.Label(right, "", "GameFontHighlightSmall")
+		-- three lines of facts, each cut short rather than wrapped
+		info = CreateFrame("Frame", nil, right)
 		info:SetPoint("TOPLEFT", chart, "BOTTOMLEFT", 4, -4)
 		info:SetPoint("RIGHT", right, "RIGHT", -4, 0)
-		info:SetJustifyH("LEFT")
-		if info.SetWordWrap then info:SetWordWrap(true) end
 		info:SetHeight(42)
+		info.lines = {}
+		for i = 1, 3 do
+			local l = W.Label(info, "", "GameFontHighlightSmall")
+			l:SetPoint("TOPLEFT", 0, -(i - 1) * 14)
+			l:SetPoint("RIGHT", info, "RIGHT", 0, 0)
+			l:SetJustifyH("LEFT")
+			if l.SetWordWrap then l:SetWordWrap(false) end
+			info.lines[i] = l
+		end
 
 		-- how it's made / what uses it
 		viewBtn = W.Cycle(right, "", 110, function() return { { "craft", "How it's made" }, { "used", "What uses it" } } end,
@@ -1391,7 +1437,7 @@ do
 		if sub.SetWordWrap then sub:SetWordWrap(false) end
 
 		craftList = W.List(right, {
-			{ label = "Part", width = 200, icon = function(r) return W.ItemIcon(r.item) end, text = function(r) return string.rep("   ", r.depth) .. itemText(App.state.d, r.item) end },
+			{ label = "Part", width = 170, icon = function(r) return W.ItemIcon(r.item) end, text = function(r) return string.rep("   ", r.depth) .. itemText(App.state.d, r.item) end },
 			{ label = "Qty", width = 40, align = "RIGHT", text = function(r) return W.Num(r.count, r.count % 1 == 0 and 0 or 1) end },
 			{ label = "Each", width = 72, align = "RIGHT", text = function(r) return W.Money(r.source.unit, true) end },
 			{ label = "Total", width = 72, align = "RIGHT", text = function(r) return W.Money(r.source.unit * r.count, true) end },
@@ -1408,9 +1454,9 @@ do
 			end,
 		})
 		usedList = W.List(right, {
-			{ label = "Used in", width = 200, icon = function(u) return W.ItemIcon(u.recipe.out) end, text = function(u) return itemText(App.state.d, u.recipe.out, u.recipe.name) end, sort = function(u) return u.recipe.name end },
+			{ label = "Used in", width = 170, icon = function(u) return W.ItemIcon(u.recipe.out) end, text = function(u) return itemText(App.state.d, u.recipe.out, u.recipe.name) end, sort = function(u) return u.recipe.name end },
 			{ label = "Needs", width = 45, align = "RIGHT", text = function(u) return tostring(u.needs) end, sort = function(u) return u.needs end },
-			{ label = "Profession", width = 90, text = function(u) return profName(App.state.d, u.recipe.skill) end, sort = function(u) return profName(App.state.d, u.recipe.skill) end },
+			{ label = "Profession", width = 80, text = function(u) return profName(App.state.d, u.recipe.skill) end, sort = function(u) return profName(App.state.d, u.recipe.skill) end },
 			{ label = "Profit", width = 72, align = "RIGHT", text = function(u) return u.profit and W.Money(u.profit, true) or "-" end, sort = function(u) return u.profit end, tip = "Per craft, at today's prices" },
 			{ label = "Known", width = 45, text = function(u) return u.known and (C.good .. "yes|r") or (C.muted .. "no|r") end, sort = function(u) return u.known and 1 or 0 end },
 		}, {
@@ -1453,17 +1499,41 @@ do
 		local g = App.GraphData(id)
 		chart:SetData(g.hist, g.refs)
 		empty:SetText(#g.hist == 0 and "No price history yet: Auctionator records it as the AH is scanned." or "")
-		local lines = g.lines
-		local extra = {}
+		-- three lines: buy or make it now; what it's worth; vendors and your stock
+		local l1, l2, l3 = {}, {}, {}
+		local row = g.row
+		if row then
+			l1[#l1 + 1] = ("AH %s, %s listed (%s, %s)"):format(W.Money(row.price, true), row.qty and row.qty > 0 and tostring(row.qty) or "?",
+				row.src == "tsm" and "TSM" or row.src == "auctionator" and "Auctionator" or row.src == "listings" and "searched" or "scan", W.Ago(row.t))
+		else
+			l1[#l1 + 1] = C.muted .. "not seen on the AH|r"
+		end
+		local m = T.Mats(id)
+		if m then
+			local cheaper = row and m.unit < row.price
+			l1[#l1 + 1] = ("mats %s%s (%s%s)"):format(cheaper and W.MoneyIn(m.unit, C.good) or W.Money(m.unit, true),
+				cheaper and (C.good .. " cheaper to make|r") or "", m.recipe.name, m.other and ", a recipe you can't use" or "")
+		end
+		local sl = g.sales
+		if sl and sl.market then l2[#l2 + 1] = "TSM market " .. W.Money(sl.market, true) end
+		if sl and sl.avgSale then l2[#l2 + 1] = "region sale avg " .. W.Money(sl.avgSale, true) end
+		if sl and sl.soldPerDay then
+			l2[#l2 + 1] = ("%s sold a day%s"):format(W.Num(sl.soldPerDay, sl.soldPerDay < 10 and 1 or 0), sl.saleRate and (", " .. math.floor(sl.saleRate * 100 + 0.5) .. "% sell") or "")
+		end
 		local med = Prices.AtrMedian(s.atr, id, 14, 3)
-		if med then extra[#extra + 1] = "Auctionator 2-week median " .. W.Money(med, true) end
-		if g.sales and g.sales.market then extra[#extra + 1] = "TSM market " .. W.Money(g.sales.market, true) end
-		if g.sales and g.sales.avgSale then extra[#extra + 1] = "region sale avg " .. W.Money(g.sales.avgSale, true) end
+		if med then l2[#l2 + 1] = "Auctionator 2 wk " .. W.Money(med, true) end
+		if g.vendor and g.vendor > 0 then l3[#l3 + 1] = "vendors pay " .. W.Money(g.vendor, true) end
 		local buyV = s.market.vendor[id]
-		if buyV then extra[#extra + 1] = "vendors sell it for " .. W.Money(buyV, true) end
-		if g.vendor and g.vendor > 0 then extra[#extra + 1] = "vendors pay " .. W.Money(g.vendor, true) end
-		extra[#extra + 1] = ("you have %d (%d in bags)"):format(s.inventory[id] or 0, s.bags[id] or 0)
-		info:SetText(table.concat(lines, "  ·  ") .. "\n" .. table.concat(extra, "  ·  "))
+		if buyV then l3[#l3 + 1] = "vendors sell it for " .. W.Money(buyV, true) end
+		l3[#l3 + 1] = ("you have %d (%d in bags)"):format(s.inventory[id] or 0, s.bags[id] or 0)
+		local n = 0
+		for _, l in ipairs({ l1, l2, l3 }) do
+			if #l > 0 then
+				n = n + 1
+				info.lines[n]:SetText(table.concat(l, "  ·  "))
+			end
+		end
+		for i = n + 1, 3 do info.lines[i]:SetText("") end
 
 		-- recipes that make it: known first, then cheapest
 		local engine = App.Engine(App.ui.crafts.craftMode, App.ui.crafts.strategy, App.overrides)
@@ -1504,7 +1574,8 @@ do
 				local lc = Leveling.LearnCost(r, s.market)
 				learn = C.muted .. ("  · not known: learn at %d%s"):format(Data.LearnLevel(r) or 0, lc and lc.text and (", " .. lc.text) or "") .. "|r"
 			end
-			sub:SetText(("%s · cost %s · sells %s · profit %s%s"):format(profName(s.d, r.skill), W.Money(e.cost, true), W.Money(e.revenue, true),
+			local each = r.qty > 1 and (" (" .. W.Money(e.cost / r.qty, true) .. " each)") or ""
+			sub:SetText(("%s · mats %s%s · sells %s · profit %s%s"):format(profName(s.d, r.skill), W.Money(e.cost, true), each, W.Money(e.revenue, true),
 				e.complete and W.Money(e.profit, true) or "-", learn))
 			craftList:SetData(App.tabs.crafts.PlanRows(engine, e.parts, 0, 1, {}), "No parts.")
 		else

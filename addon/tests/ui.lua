@@ -222,9 +222,10 @@ end
 if os.getenv("SV") then
 	local items = App.tabs.items
 	App.Show("items")
-	for _, q in ipairs({ "iron ore", "gyro", "gold power", "moonsight", "linen" }) do
+	for _, q in ipairs({ "iron ore", "gyro", "gold power", "moonsight", "linen", "silver bar" }) do
 		local res = items.Search(q)
-		log("items '%s': %d found, first %s", q, #res, res[1] and res[1].name or "-")
+		local m = res[1] and items.Mats(res[1].item)
+		log("items '%s': %d found, first %s, mats %s", q, #res, res[1] and res[1].name or "-", m and (m.unit .. "c via " .. m.recipe.name) or "-")
 		if res[1] then
 			items.SelectItem(res[1].item)
 			App.ui.items.view = "craft" items.ShowItem()
@@ -505,6 +506,12 @@ if not os.getenv("SV") then
 	-- open Bronze Bar: how it's made
 	items.lists.results.rows[1].scripts.OnClick(items.lists.results.rows[1], "LeftButton")
 	assert(items.item == 2841 and items.recipe and items.recipe.name == "Smelt Bronze", "made by Smelt Bronze")
+	local mats = items.Mats(2841)
+	assert(mats and mats.recipe.name == "Smelt Bronze" and mats.unit > 0, "what making one costs")
+	local resRow = items.lists.results.rows[1]
+	local matsCell = resRow.cells[3].text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+	assert(matsCell ~= "-", "a Mats column in the results: " .. matsCell)
+	log("Bronze Bar: mats %s each (Smelt Bronze makes 2)", matsCell)
 	local partNames = {}
 	for _, r in ipairs(items.lists.craft.data) do partNames[#partNames + 1] = ns.Data.ItemName(App.state.d, r.item) end
 	assert(#partNames >= 2, "its parts: " .. table.concat(partNames, ", "))
