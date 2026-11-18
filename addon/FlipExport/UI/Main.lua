@@ -1161,12 +1161,21 @@ do
 		upsTitle = W.Label(p, "", "GameFontNormal")
 		upsTitle:SetPoint("TOPLEFT", 2, -32)
 		ups = W.List(p, {
-			{ label = "Craft", width = 220, icon = function(u) return W.ItemIcon(u.recipe.out) end, text = function(u) return itemText(App.state.d, u.recipe.out, u.recipe.name) end, sort = function(u) return u.recipe.name end },
-			{ label = "Colour", width = 80, text = function(u) return colorChance(u.color, u.chance) end, sort = function(u) return u.chance end },
-			{ label = "Profit each", width = 80, align = "RIGHT", text = function(u) return W.Money(-u.net, true) end, sort = function(u) return -u.net end, tip = "What the product sells for minus the cost of one craft (red: it costs you)" },
-			{ label = "Per point", width = 80, align = "RIGHT", text = function(u) return W.Money(-u.net / u.chance, true) end, sort = function(u) return -u.net / u.chance end, tip = "Profit per skill point, counting the crafts that give no point (red: what each point costs)" },
-			{ label = "Skill-ups", width = 110, text = function(u) return levels(u.recipe) end, sort = function(u) return u.recipe.grey end, tip = "Orange (always), yellow (usually), green (rarely), grey (never)" },
-			{ label = "Learn", width = 200, text = function(u) return learnTag(App.state, u.recipe) end },
+			{ label = "Craft", width = 180, icon = function(u) return W.ItemIcon(u.recipe.out) end, text = function(u) return itemText(App.state.d, u.recipe.out, u.recipe.name) end, sort = function(u) return u.recipe.name end },
+			{ label = "Colour", width = 72, text = function(u) return colorChance(u.color, u.chance) end, sort = function(u) return u.chance end },
+			{ label = "Profit each", width = 70, align = "RIGHT", text = function(u) return W.Money(-u.net, true) end, sort = function(u) return -u.net end, tip = "What the product sells for minus the cost of one craft (red: it costs you)" },
+			{ label = "Per point", width = 70, align = "RIGHT", text = function(u) return W.Money(-u.net / u.chance, true) end, sort = function(u) return -u.net / u.chance end, tip = "Profit per skill point, counting the crafts that give no point (red: what each point costs)" },
+			{ label = "Next pt", width = 48, align = "RIGHT", text = function(u) return W.Num(1 / u.chance, u.chance >= 1 and 0 or 1) end, sort = function(u) return 1 / u.chance end, tip = "Crafts for the next point, on average" },
+			{ label = "Crafts", width = 82, align = "RIGHT", text = function(u)
+				if not u.toCrafts then return "-" end
+				local n = W.Num(math.ceil(u.toCrafts - 1e-9), 0)
+				if u.reach < App.ui.lvl.target then return n .. C.muted .. " to " .. u.reach .. "|r" end
+				return n
+			end, sort = function(u) return u.toCrafts end, tip = "How many to make to reach the target with this recipe alone (on average). Grey \"to N\": it turns grey at N, before the target" },
+			{ label = "Total", width = 70, align = "RIGHT", text = function(u) return u.toCrafts and W.Money(-u.net * u.toCrafts, true) or "-" end,
+				sort = function(u) return u.toCrafts and -u.net * u.toCrafts end, tip = "Profit (red: cost) of all those crafts, before learning it" },
+			{ label = "Skill-ups", width = 100, text = function(u) return levels(u.recipe) end, sort = function(u) return u.recipe.grey end, tip = "Orange (always), yellow (usually), green (rarely), grey (never)" },
+			{ label = "Learn", width = 150, text = function(u) return learnTag(App.state, u.recipe) end },
 		}, { sortBy = 4, onClick = function(u) App.SearchItem(u.recipe.out) end, onEnter = function(f, u) W.ShowItemTooltip(f, u.recipe.out) end })
 		ups:SetPoint("TOPLEFT", upsTitle, "BOTTOMLEFT", -2, -4)
 		ups:SetPoint("RIGHT", p, "RIGHT", 0, 0)
@@ -1227,8 +1236,8 @@ do
 			if s.known[r.spell] then return 0 end
 			return Leveling.LearnCost(r, s.market).cost or 0
 		end
-		upsTitle:SetText(("Everything that gives a point at %d"):format(pr.rank))
-		ups:SetData(Leveling.SkillUpsAt(recipes, pr.rank, net), "No recipe in this list gives a point at your skill. Try including trainer recipes.")
+		upsTitle:SetText(("Everything that gives a point at %d (Crafts: how many to reach %d with that recipe alone)"):format(pr.rank, ui.target))
+		ups:SetData(Leveling.SkillUpsAt(recipes, pr.rank, net, ui.target), "No recipe in this list gives a point at your skill. Try including trainer recipes.")
 		local plan = Leveling.Plan(recipes, pr.rank, ui.target, net, learn)
 		path:SetData(plan.steps, "No path found.")
 		if plan.stuckAt then

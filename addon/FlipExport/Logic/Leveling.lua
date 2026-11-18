@@ -74,14 +74,30 @@ function Leveling.Plan(recipes, from, to, netCost, learnCost)
 end
 
 --- Every recipe that can give a point at this skill, cheapest per point first.
-function Leveling.SkillUpsAt(recipes, skill, netCost)
+--- Crafts expected to go from skill `from` to `to` with only this recipe (a point every 1/chance
+--- crafts at each level), stopping where it turns grey: crafts, reach (the skill it gets to).
+function Leveling.CraftsTo(r, from, to)
+	local crafts, skill = 0, from
+	while skill < to do
+		local c = Leveling.Chance(r, skill)
+		if c <= 0 then break end
+		crafts = crafts + 1 / c
+		skill = skill + 1
+	end
+	return crafts, skill
+end
+
+--- @param target optional skill to aim for: each row also gets toCrafts and reach (CraftsTo)
+function Leveling.SkillUpsAt(recipes, skill, netCost, target)
 	local out = {}
 	for _, r in ipairs(recipes) do
 		local chance = Leveling.Chance(r, skill)
 		if chance > 0 then
 			local n = netCost(r)
 			if n and n == n and n ~= math.huge then
-				out[#out + 1] = { recipe = r, chance = chance, color = Leveling.Color(r, skill), net = n, perPoint = n >= 0 and n / chance or n }
+				local row = { recipe = r, chance = chance, color = Leveling.Color(r, skill), net = n, perPoint = n >= 0 and n / chance or n }
+				if target then row.toCrafts, row.reach = Leveling.CraftsTo(r, skill, target) end
+				out[#out + 1] = row
 			end
 		end
 	end

@@ -363,4 +363,19 @@ test("price history from Auctionator, plus today's scan; the median uses days wi
 	eq(Prices.AtrMedian(atr, 2840, 14, 2), 13, "median of 11 and 14 (14 from the high), rounded")
 end)
 
+test("crafts to reach a skill with one recipe", function()
+	local r = { learn = 200, yellow = 205, grey = 225, spell = 1 }
+	-- at 215 a point every 20 / (225 - skill) crafts: 20 * (1/10 + 1/9 + ... + 1/1)
+	local n, reach = Leveling.CraftsTo(r, 215, 225)
+	local want = 0
+	for k = 1, 10 do want = want + 20 / k end
+	eq(math.floor(n * 1000 + 0.5), math.floor(want * 1000 + 0.5)) eq(reach, 225)
+	n, reach = Leveling.CraftsTo(r, 215, 230)
+	eq(reach, 225, "grey at 225") eq(math.floor(n * 1000 + 0.5), math.floor(want * 1000 + 0.5))
+	n, reach = Leveling.CraftsTo(r, 200, 205)
+	eq(n, 5, "orange: a point a craft") eq(reach, 205)
+	local rows = Leveling.SkillUpsAt({ r }, 215, function() return 100 end, 225)
+	eq(rows[1].reach, 225) eq(math.floor(rows[1].toCrafts + 0.5), 59)
+end)
+
 print(("logic tests: %d passed"):format(passed))
