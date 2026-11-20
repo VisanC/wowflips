@@ -2,7 +2,7 @@
 local _, ns = ...
 local D = { items = {}, recipes = {}, skills = {}, vendorReagents = {}, gather = {} }
 ns.GameData = D
-D.build = "1.60.1.70959"
+D.build = "1.60.1.71037"
 local I, R = D.items, D.recipes
 D.skills[40] = "Poisons"
 D.skills[129] = "First Aid"
@@ -881,6 +881,7 @@ I[7990] = { "Plans: Heavy Mithril Helm", 2, 2500, 10000, 1, 1 }
 I[7991] = { "Plans: Mithril Plate Shoulders", 3, 2500, 10000, 1, 1 }
 I[7992] = { "Plans: Blue Glittering Axe", 2, 2000, 8000, 1, 1 }
 I[7993] = { "Plans: Dazzling Mithril Rapier", 2, 2500, 10000, 1, 1 }
+I[7994] = { "Plans: Orcish War Leggings", 2, 100, 500, 1, 1 }
 I[7995] = { "Plans: Mithril Plate Bracers", 1, 1500, 6000, 1, 1 }
 I[8028] = { "Plans: Runed Mithril Hammer", 3, 2500, 10000, 1, 1 }
 I[8029] = { "Plans: Wicked Mithril Blade", 2, 2000, 8000, 1, 1 }
@@ -1227,9 +1228,9 @@ I[12224] = { "Crispy Bat Wing", 1, 10, 40, 1, 20 }
 I[12226] = { "Recipe: Crispy Bat Wing", 1, 6, 25, 1, 1 }
 I[12227] = { "Recipe: Lean Wolf Steak", 1, 400, 1600, 1, 1 }
 I[12228] = { "Recipe: Roast Raptor", 1, 1250, 5000, 1, 1 }
-I[12229] = { "Recipe: Hot Wolf Ribs", 1, 1250, 5000, 1, 1 }
 end
 do
+I[12229] = { "Recipe: Hot Wolf Ribs", 1, 1250, 5000, 1, 1 }
 I[12231] = { "Recipe: Jungle Stew", 1, 750, 3000, 1, 1 }
 I[12232] = { "Recipe: Carrion Surprise", 1, 1250, 5000, 1, 1 }
 I[12233] = { "Recipe: Mystery Stew", 1, 750, 3000, 1, 1 }
@@ -1629,9 +1630,9 @@ I[15417] = { "Devilsaur Leather", 1, 500, 2000, 1, 20 }
 I[15419] = { "Warbear Leather", 1, 600, 2400, 1, 20 }
 I[15420] = { "Ironfeather", 1, 100, 400, 1, 50 }
 I[15422] = { "Frostsaber Leather", 1, 500, 2000, 1, 20 }
-I[15423] = { "Chimera Leather", 1, 500, 2000, 1, 20 }
 end
 do
+I[15423] = { "Chimera Leather", 1, 500, 2000, 1, 20 }
 I[15564] = { "Rugged Armor Kit", 1, 1000, 4000, 1, 10 }
 I[15724] = { "Pattern: Heavy Scorpid Bracers", 1, 3000, 12000, 1, 1 }
 I[15725] = { "Pattern: Wicked Leather Gauntlets", 1, 3000, 12000, 1, 1 }
@@ -2031,9 +2032,9 @@ I[20879] = { "Idol of Life", 3, 0, 0, 1, 250 }
 I[20881] = { "Idol of Strife", 3, 0, 0, 1, 250 }
 I[20882] = { "Idol of War", 3, 0, 0, 1, 250 }
 I[21023] = { "Dirge's Kickin' Chimaerok Chops", 1, 250, 5000, 5, 20 }
-I[21024] = { "Chimaerok Tenderloin", 1, 0, 0, 1, 20 }
 end
 do
+I[21024] = { "Chimaerok Tenderloin", 1, 0, 0, 1, 20 }
 I[21025] = { "Recipe: Dirge's Kickin' Chimaerok Chops", 4, 1250, 5000, 1, 1 }
 I[21071] = { "Raw Sagefish", 1, 25, 100, 1, 20 }
 I[21072] = { "Smoked Sagefish", 1, 40, 160, 1, 20 }
@@ -2433,9 +2434,9 @@ I[249872] = { "Slimy Smoothie", 1, 1, 1, 1, 20 }
 I[249873] = { "Mrrggl Smrrthle", 1, 1, 1, 1, 20 }
 I[249874] = { "Calcified Smoothie", 1, 1, 1, 1, 20 }
 I[249875] = { "Spicy Smoothie", 1, 1, 1, 1, 20 }
-I[249876] = { "Wicked Smoothie", 1, 1, 1, 1, 20 }
 end
 do
+I[249876] = { "Wicked Smoothie", 1, 1, 1, 1, 20 }
 I[249879] = { "Recipe: Peace Tea", 1, 10, 7500, 1, 1 }
 I[249880] = { "Recipe: Royal Tea", 1, 1875, 7500, 1, 1 }
 I[249881] = { "Recipe: Root Tea", 1, 1875, 7500, 1, 1 }
@@ -2835,9 +2836,9 @@ I[251443] = { "Plans: Blessed Plate Leggings", 2, 4000, 20000, 1, 1 }
 I[251444] = { "Plans: Blessed Plate Belt", 2, 4000, 20000, 1, 1 }
 I[251445] = { "Plans: Blessed Plate Helm", 2, 5000, 25000, 1, 1 }
 I[251446] = { "Plans: Blessed Plate Chest", 2, 5000, 25000, 1, 1 }
-I[251447] = { "Plans: Enriched Thorium Breastplate", 3, 1500, 7500, 1, 1 }
 end
 do
+I[251447] = { "Plans: Enriched Thorium Breastplate", 3, 1500, 7500, 1, 1 }
 I[251448] = { "Plans: Enriched Thorium Leggings", 3, 1500, 7500, 1, 1 }
 I[251449] = { "Plans: Enriched Thorium Helm", 3, 1500, 7500, 1, 1 }
 I[251450] = { "Plans: Champion's Legplates", 4, 5000, 25000, 1, 1 }
@@ -3237,9 +3238,9 @@ I[253891] = { "Silky Boots", 3, 320, 1602, 1, 1 }
 I[253892] = { "Pattern: Silky Boots", 3, 300, 1500, 1, 1 }
 I[253893] = { "Flame Boots", 3, 323, 1615, 1, 1 }
 I[253894] = { "Pattern: Flame Boots", 3, 300, 1500, 1, 1 }
-I[253895] = { "Shadow Boots", 3, 325, 1627, 1, 1 }
 end
 do
+I[253895] = { "Shadow Boots", 3, 325, 1627, 1, 1 }
 I[253896] = { "Pattern: Shadow Boots", 3, 300, 1500, 1, 1 }
 I[253897] = { "Pearly Boots", 3, 328, 1640, 1, 1 }
 I[253898] = { "Pattern: Pearly Boots", 3, 300, 1500, 1, 1 }
@@ -3639,9 +3640,9 @@ I[273990] = { "Pattern: Mantle of Conviction", 4, 0, 0, 1, 1 }
 I[273991] = { "Pattern: Treads of Conviction", 4, 0, 0, 1, 1 }
 I[273992] = { "Pattern: Leggings of Conviction", 4, 0, 0, 1, 1 }
 I[273993] = { "Pattern: Handguards of Conviction", 4, 0, 0, 1, 1 }
-I[273994] = { "Pattern: Pauldrons of Conviction", 4, 0, 0, 1, 1 }
 end
 do
+I[273994] = { "Pattern: Pauldrons of Conviction", 4, 0, 0, 1, 1 }
 I[273995] = { "Pattern: Boots of Conviction", 4, 0, 0, 1, 1 }
 I[273996] = { "Pattern: Grimstitch Pants", 4, 0, 0, 1, 1 }
 I[273997] = { "Pattern: Grimstitch Gloves", 4, 0, 0, 1, 1 }
@@ -4481,7 +4482,7 @@ R[#R + 1] = { 9945, "Ornate Mithril Pants", 164, 215, 235, 7926, 1, { 3860, 12, 
 R[#R + 1] = { 9950, "Ornate Mithril Gloves", 164, 215, 235, 7927, 1, { 3860, 10, 4338, 6, 6037, 1, 7966, 1 }, 195, 7984 }
 R[#R + 1] = { 9952, "Ornate Mithril Shoulders", 164, 220, 240, 7928, 1, { 3860, 12, 6037, 1, 4304, 6 }, 200, 7985 }
 R[#R + 1] = { 9954, "Truesilver Gauntlets", 164, 220, 240, 7938, 1, { 3860, 10, 6037, 8, 7909, 3, 3864, 3, 5966, 1, 7966, 2 }, 0, 0 }
-R[#R + 1] = { 9957, "Orcish War Leggings", 164, 225, 245, 7929, 1, { 3860, 12, 7067, 1 }, 0, 0 }
+R[#R + 1] = { 9957, "Orcish War Leggings", 164, 225, 245, 7929, 1, { 3860, 12, 7067, 1 }, 205, 7994 }
 R[#R + 1] = { 9959, "Heavy Mithril Breastplate", 164, 225, 245, 7930, 1, { 3860, 16 }, 0, 0 }
 R[#R + 1] = { 9961, "Mithril Coif", 164, 225, 245, 7931, 1, { 3860, 10, 4338, 6 }, 0, 0 }
 R[#R + 1] = { 9964, "Mithril Spurs", 164, 230, 250, 7969, 1, { 3860, 4, 7966, 3 }, 210, 7989 }
